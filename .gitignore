@@ -9,3 +9,4 @@ pbserver/
 public/assets/*
 src/uploads/*
 src/uploads_meta/*
+src/__pycache__/
