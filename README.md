@@ -10,6 +10,8 @@ GhostDrop ceased operations on June 20, 2026.
 
 Thank you to everyone who used, tested, and shared GhostDrop over its lifespan.
 
+its not done yet we would come back soon.......
+
 <div align="center">
 A product by
 <a href="https://mizucode.qzz.io">
