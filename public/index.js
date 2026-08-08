@@ -76,19 +76,20 @@ function logFrontend(eventName, detail) {
 
 
 async function getApiUrl() {
-  const apiUrlProvider = "https://raw.githubusercontent.com/SaaranshDx/GhostDrop/main/serverurl";
-  logFrontend('api-url:request', { source: apiUrlProvider });
+    if (location.hostname === '127.0.0.1' || location.hostname === 'localhost') {
+        return 'http://127.0.0.1:8000';
+    }
 
-  const res = await fetch(apiUrlProvider);
+    const apiUrlProvider =
+        'https://raw.githubusercontent.com/SaaranshDx/GhostDrop/main/serverurl';
 
-  if (!res.ok) {
-    logFrontend('api-url:failed', { status: res.status, statusText: res.statusText });
-    throw new Error("failed to fetch");
-  }
+    const res = await fetch(apiUrlProvider);
 
-  const url = await res.text();
-  logFrontend('api-url:ready', { url: url.trim() });
-  return url.trim();
+    if (!res.ok) {
+        throw new Error('failed to fetch');
+    }
+
+    return (await res.text()).trim();
 }
 
 function isNfcSupported() {
