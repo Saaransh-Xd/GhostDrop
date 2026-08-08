@@ -21,6 +21,31 @@ let qrScanLastInvalidValue = '';
 let qrScanLastInvalidAt = 0;
 const MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024;
 const SLUG_PATTERN = /^[A-Za-z0-9_-]+$/;
+const EXPIRY_LIMITS = { hours: 12, days: 6, weeks: 3 };
+
+function getUploadDuration() {
+  const unit = document.getElementById('uploadDurationUnit')?.value || 'hours';
+  const input = document.getElementById('uploadDurationInput');
+  const duration = Math.min(Number(input?.value || 6), EXPIRY_LIMITS[unit]);
+  return { duration, unit };
+}
+
+function updateUploadDuration() {
+  const unitInput = document.getElementById('uploadDurationUnit');
+  const durationInput = document.getElementById('uploadDurationInput');
+  const value = document.getElementById('uploadDurationValue');
+  const limit = document.getElementById('uploadDurationLimit');
+  const hint = document.getElementById('dropExpiryHint');
+  if (!unitInput || !durationInput || !value || !limit) return;
+  const unit = unitInput.value;
+  const max = EXPIRY_LIMITS[unit];
+  durationInput.max = max;
+  if (Number(durationInput.value) > max) durationInput.value = max;
+  const duration = Number(durationInput.value);
+  value.textContent = duration + ' ' + unit;
+  limit.textContent = 'up to ' + max + ' ' + unit;
+  if (hint) hint.textContent = 'max 100MB  · expires in ' + duration + ' ' + unit;
+}
 
 function validateSlugInput() {
   const input = document.getElementById('uploadSlugInput');
@@ -1080,12 +1105,17 @@ async function proceedWithUpload(password = '') {
   if (isStatic) {
     fd.append('is_static', 'true');
   }
+  const uploadDuration = getUploadDuration();
+  fd.append('duration', String(uploadDuration.duration));
+  fd.append('duration_unit', uploadDuration.unit);
   logFrontend('upload:start', {
     name: selectedFile.name,
     size: selectedFile.size,
     hasSlug: Boolean(slug),
     hasPassword: Boolean(password),
     isStatic,
+    duration: uploadDuration.duration,
+    durationUnit: uploadDuration.unit,
   });
   try {
     const res = await fetch(BASE + '/upload/', {
@@ -1148,7 +1178,7 @@ async function proceedWithUpload(password = '') {
     if (slugErrorEl) slugErrorEl.textContent = '';
     selectedFile = null;
     shareFile(url);
-    startExpiry(6 * 3600);
+    startExpiry(data.expires_in_hours * 3600);
     navigator.clipboard?.writeText(url).catch(() => {});
     toast('uploaded — link copied');
     logFrontend('upload:success', {
@@ -1777,6 +1807,12 @@ async function initializePage() {
   if (slugInput) {
     slugInput.addEventListener('input', validateSlugInput);
   }
+
+  const durationInput = document.getElementById('uploadDurationInput');
+  const durationUnit = document.getElementById('uploadDurationUnit');
+  if (durationInput) durationInput.addEventListener('input', updateUploadDuration);
+  if (durationUnit) durationUnit.addEventListener('change', updateUploadDuration);
+  updateUploadDuration();
 
   // Password popup event listeners
   const passwordPopupSkip = document.getElementById('passwordPopupSkip');

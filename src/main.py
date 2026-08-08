@@ -55,6 +55,7 @@ logger = configure_logging()
 
 EXPIRY_HOURS = 6 # 6 hours 
 EXPIRY_DURATION = timedelta(hours=EXPIRY_HOURS)
+EXPIRY_LIMITS = {"hours": 12, "days": 6, "weeks": 3}
 EXPIRED_MESSAGE = "this file is gone"
 SRC_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = Path("uploads")
@@ -149,14 +150,15 @@ def write_metadata(
     size_bytes: int | None = None,
     password: str | None = None,
     password_hash: str | None = None,
-    is_static: bool = False
+    is_static: bool = False,
+    expiry_duration: timedelta = EXPIRY_DURATION,
 ) -> None:
     metadata = {
         "password_hash": password_hash,
         "has_password": password_hash is not None,
         "original_name": original_name,
         "size_bytes": size_bytes,
-        "expires_at": (utc_now() + EXPIRY_DURATION).isoformat(),
+        "expires_at": (utc_now() + expiry_duration).isoformat(),
         "views": 0,
         "is_static": is_static
     }
@@ -358,7 +360,23 @@ async def health_check():
 
 
 @app.post("/upload/")
-async def upload_file(file: UploadFile = File(...), Authorisation: Annotated[str | None, Form()] = None, slug: Annotated[str | None, Form()] = None, is_static: Annotated[bool | None, Form()] = False):
+async def upload_file(
+    file: UploadFile = File(...),
+    Authorisation: Annotated[str | None, Form()] = None,
+    slug: Annotated[str | None, Form()] = None,
+    is_static: Annotated[bool | None, Form()] = False,
+    duration: Annotated[int | None, Form()] = EXPIRY_HOURS,
+    duration_unit: Annotated[str | None, Form()] = "hours",
+):
+
+    duration_unit = (duration_unit or "hours").lower()
+    max_duration = EXPIRY_LIMITS.get(duration_unit)
+    if max_duration is None or duration is None or duration < 1 or duration > max_duration:
+        limits = ", ".join(f"{unit}: 1-{limit}" for unit, limit in EXPIRY_LIMITS.items())
+        raise HTTPException(status_code=400, detail=f"Duration must be between 1 and the maximum for its unit ({limits})")
+
+    duration_hours = duration * {"hours": 1, "days": 24, "weeks": 168}[duration_unit]
+    expiry_duration = timedelta(hours=duration_hours)
 
     if file.size > MAX_SIZE:
         logger.warning("Rejected upload for %s: file too large", file.filename)
@@ -393,14 +411,17 @@ async def upload_file(file: UploadFile = File(...), Authorisation: Annotated[str
         file.filename or file_id,
         is_static=is_static,
         size_bytes=file_path.stat().st_size,
-        password_hash=password_hash
+        password_hash=password_hash,
+        expiry_duration=expiry_duration,
     )    
     logger.info("Stored upload %s as %s", file.filename, file_id)
 
     response = {
         "id": file_id,
         "original_name": file.filename,
-        "expires_in_hours": EXPIRY_HOURS,
+        "expires_in_hours": duration_hours,
+        "duration": duration,
+        "duration_unit": duration_unit,
         "is_static": bool(is_static),
     }
     if is_static:

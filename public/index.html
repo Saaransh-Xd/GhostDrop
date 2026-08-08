@@ -395,9 +395,24 @@ body.modal-open {
           </svg>
         </span>
         <p class="drop-label">drop a file or click to browse</p>
-        <p class="drop-sub">max 100MB  &middot; expires in 6 hours</p>
+        <p class="drop-sub" id="dropExpiryHint">max 100MB  &middot; expires in 6 hours</p>
       </div>
       <div class="file-pill" id="filePill"></div>
+      <div class="upload-duration">
+        <div class="upload-duration-head">
+          <label class="upload-slug-label" for="uploadDurationInput">Keep upload for</label>
+          <span class="upload-duration-value" id="uploadDurationValue">6 hours</span>
+        </div>
+        <div class="upload-duration-controls">
+          <input type="range" id="uploadDurationInput" min="1" max="12" value="6">
+          <select id="uploadDurationUnit" aria-label="Expiry unit">
+            <option value="hours">hours</option>
+            <option value="days">days</option>
+            <option value="weeks">weeks</option>
+          </select>
+        </div>
+        <div class="upload-duration-limit" id="uploadDurationLimit">up to 12 hours</div>
+      </div>
       <div class="upload-slug">
         <label class="upload-slug-label" for="uploadSlugInput">Custom slug (optional) </label>
         <input type="text" id="uploadSlugInput" placeholder="custom identifier for this file">
@@ -476,18 +491,24 @@ body.modal-open {
             <tr><td>file</td><td>file</td><td style="color:var(--green)">yes</td><td>the file to upload</td></tr>
             <tr><td>slug</td><td>form</td><td>no</td><td>custom identifier (2+ chars, only letters/numbers/hyphens/underscores). Must not be a reserved slug (see below).</td></tr>
             <tr><td>password</td><td>form</td><td>no</td><td>optional file password for protected downloads</td></tr>
+            <tr><td>duration</td><td>form</td><td>no</td><td>retention length from 1 to 12 hours, 1 to 6 days, or 1 to 3 weeks (defaults to 6 hours)</td></tr>
+            <tr><td>duration_unit</td><td>form</td><td>no</td><td><code>hours</code>, <code>days</code>, or <code>weeks</code></td></tr>
           </tbody>
         </table>
         <p><strong>Reserved slugs</strong> — these cannot be used: <code>upload</code>, <code>download</code>, <code>delete</code>, <code>health</code>, <code>files</code>, <code>metadata</code>, <code>api</code>, <code>admin</code>, <code>static</code>, <code>assets</code>, <code>public</code>, <code>docs</code>, <code>openapi</code>, <code>redoc</code>, <code>www</code>, <code>root</code>, <code>system</code>, <code>config</code>, <code>help</code>, <code>status</code></p>
         <div class="code-blk"><button class="ccopy" onclick="cc(this)">copy</button>curl -X POST <span class="s">"https://link.ghostdrop.qzz.io/upload/"</span> \
   -F <span class="s">"file=@example.txt"</span> \
   -F <span class="s">"slug=my-file"</span> \
-  -F <span class="s">"password=my-secret"</span></div>
+  -F <span class="s">"password=my-secret"</span> \
+  -F <span class="s">"duration=3"</span> \
+  -F <span class="s">"duration_unit=days"</span></div>
         <div class="code-blk"><button class="ccopy" onclick="cc(this)">copy</button><span class="cm">// 200 OK</span>
 {
   <span class="k">"id"</span>: <span class="s">"my-file"</span>,
   <span class="k">"original_name"</span>: <span class="s">"example.txt"</span>,
-  <span class="k">"expires_in_hours"</span>: 6
+  <span class="k">"expires_in_hours"</span>: 72,
+  <span class="k">"duration"</span>: 3,
+  <span class="k">"duration_unit"</span>: <span class="s">"days"</span>
 }</div>
         <div class="code-blk"><span class="spill s400">400</span> { <span class="k">"detail"</span>: <span class="s">"Slug can only contain letters, numbers, hyphens and underscores"</span> }
 <span class="spill s400">400</span> { <span class="k">"detail"</span>: <span class="s">"That slug is reserved and cannot be used"</span> }
