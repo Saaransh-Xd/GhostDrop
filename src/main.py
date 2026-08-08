@@ -23,6 +23,7 @@ import secrets
 import string
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
+import mimetypes
 
 load_dotenv()
 
@@ -148,6 +149,7 @@ def write_metadata(
     size_bytes: int | None = None,
     password: str | None = None,
     password_hash: str | None = None,
+    is_static: bool = False
 ) -> None:
     metadata = {
         "password_hash": password_hash,
@@ -156,6 +158,7 @@ def write_metadata(
         "size_bytes": size_bytes,
         "expires_at": (utc_now() + EXPIRY_DURATION).isoformat(),
         "views": 0,
+        "is_static": is_static
     }
     metadata_path(file_id).write_text(json.dumps(metadata), encoding="utf-8")
     logger.info("Stored metadata for %s (%s)", file_id, original_name)
@@ -355,12 +358,12 @@ async def health_check():
 
 
 @app.post("/upload/")
-async def upload_file(file: UploadFile = File(...), Authorisation: Annotated[str | None, Form()] = None, slug: Annotated[str | None, Form()] = None):
+async def upload_file(file: UploadFile = File(...), Authorisation: Annotated[str | None, Form()] = None, slug: Annotated[str | None, Form()] = None, is_static: Annotated[bool | None, Form()] = False):
 
     if file.size > MAX_SIZE:
         logger.warning("Rejected upload for %s: file too large", file.filename)
         raise HTTPException(status_code=413, detail="File too large")
-
+    
     if slug:
         slug_lower = slug.lower()
         if not SLUG_PATTERN.fullmatch(slug):
@@ -388,16 +391,22 @@ async def upload_file(file: UploadFile = File(...), Authorisation: Annotated[str
     write_metadata(
         file_id,
         file.filename or file_id,
+        is_static=is_static,
         size_bytes=file_path.stat().st_size,
         password_hash=password_hash
     )    
     logger.info("Stored upload %s as %s", file.filename, file_id)
 
-    return {
+    response = {
         "id": file_id,
         "original_name": file.filename,
         "expires_in_hours": EXPIRY_HOURS,
+        "is_static": bool(is_static),
     }
+    if is_static:
+        response["static_url"] = f"/static/{file_id}"
+
+    return response
 
 
 @app.get("/download.css")
@@ -424,6 +433,37 @@ async def read_items(file_id: str):
     logger.info("Rendering download page for %s", file_id)
     return HTMLResponse(content=render_download_page(file_id, metadata, file_path))
 
+@app.get("/static/{file_id}")
+async def server_satic_file(file_id: str):
+    metadata = load_metadata(file_id)
+
+    if not metadata or not metadata.get("is_static"):
+        logger.warning(
+            "Static file requested for missing or non-static file %s",
+            file_id
+        )
+        raise HTTPException(status_code=404, detail="File not found")
+
+    file_path = UPLOAD_DIR / file_id
+
+    if not file_path.exists():
+        logger.warning("Static file requested for missing file %s", file_id)
+        raise HTTPException(status_code=404, detail="File not found")
+
+    original_name = metadata.get("original_name", file_id)
+    media_type, _ = mimetypes.guess_type(original_name)
+
+    logger.info(
+        "Serving static file %s as %s",
+        file_id,
+        media_type or "application/octet-stream"
+    )
+
+    return FileResponse(
+        path=file_path,
+        media_type=media_type or "application/octet-stream",
+    )
+    
 @app.get("/files/{file_id}")
 async def get_file(file_id: str, Authorisation: Annotated[str | None, Header()] = None):
     metadata = load_metadata(file_id)

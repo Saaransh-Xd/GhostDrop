@@ -1075,11 +1075,17 @@ async function proceedWithUpload(password = '') {
   if (password) {
     fd.append('password', password);
   }
+  const staticInput = document.getElementById('uploadStaticInput');
+  const isStatic = staticInput?.checked === true;
+  if (isStatic) {
+    fd.append('is_static', 'true');
+  }
   logFrontend('upload:start', {
     name: selectedFile.name,
     size: selectedFile.size,
     hasSlug: Boolean(slug),
     hasPassword: Boolean(password),
+    isStatic,
   });
   try {
     const res = await fetch(BASE + '/upload/', {
@@ -1107,11 +1113,22 @@ async function proceedWithUpload(password = '') {
     const urlNode = document.getElementById('res-url');
     urlNode.textContent = url;
     urlNode.href = url;
+    const staticRow = document.getElementById('staticRow');
+    if (staticRow && data.static_url) {
+      const staticUrl = BASE.replace(/\/$/, '') + '/' + data.static_url.replace(/^\/+/, '');
+      const staticNode = document.getElementById('static-url');
+      staticNode.textContent = staticUrl;
+      staticNode.href = staticUrl;
+      staticRow.style.display = 'grid';
+    } else if (staticRow) {
+      staticRow.style.display = 'none';
+    }
     latestUploadedFile = {
       id: data.id,
       originalName: data.original_name,
       expiresInHours: data.expires_in_hours,
       url,
+      staticUrl: data.static_url ? BASE.replace(/\/$/, '') + '/' + data.static_url.replace(/^\/+/, '') : null,
     };
     updateShareButtonVisibility();
     updateNfcControls();
@@ -1122,6 +1139,10 @@ async function proceedWithUpload(password = '') {
     if (slugInput) {
       slugInput.value = '';
       slugInput.classList.remove('error');
+    }
+    const staticInputReset = document.getElementById('uploadStaticInput');
+    if (staticInputReset) {
+      staticInputReset.checked = false;
     }
     const slugErrorEl = document.getElementById('slugError');
     if (slugErrorEl) slugErrorEl.textContent = '';
@@ -1698,6 +1719,23 @@ async function initializePage() {
   document.querySelectorAll('[data-copy-link="true"]').forEach((btn) => {
     btn.addEventListener('click', (event) => copyLink(event, btn));
   });
+
+  const staticCopyBtn = document.getElementById('staticCopyBtn');
+  if (staticCopyBtn) {
+    staticCopyBtn.addEventListener('click', (event) => {
+      event?.preventDefault();
+      const text = document.getElementById('static-url')?.href;
+      if (!text) {
+        return;
+      }
+      logFrontend('clipboard:copy-static-link', { text });
+      navigator.clipboard?.writeText(text).then(() => {
+        staticCopyBtn.textContent = 'copied';
+        setTimeout(() => staticCopyBtn.textContent = 'copy', 1400);
+        logFrontend('clipboard:copy-static-link-success');
+      });
+    });
+  }
 
   const shareBtn = document.getElementById('shareBtn');
   if (shareBtn) {

@@ -403,6 +403,13 @@ body.modal-open {
         <input type="text" id="uploadSlugInput" placeholder="custom identifier for this file">
         <span class="slug-error" id="slugError"></span>
       </div>
+      <div class="upload-static">
+        <label class="upload-static-toggle" for="uploadStaticInput">
+          <input type="checkbox" id="uploadStaticInput">
+          <span class="upload-static-switch" aria-hidden="true"></span>
+        </label>
+        <label class="upload-static-label" for="uploadStaticInput">static link</label>
+      </div>
       <button type="button" class="upload-btn" id="uploadBtn" disabled>upload</button>
       <div class="utility-actions">
         <button type="button" class="utility-btn" id="nfcReceiveBtn" hidden>receive via nfc</button>
@@ -414,6 +421,10 @@ body.modal-open {
           <div>
             <div class="r-label">link</div>
             <div class="r-val"><a id="res-url" class="r-link" style="font-size:11px;" target="_blank" rel="noopener"></a><button type="button" class="copy-btn" data-copy-link="true">copy</button><button type="button" class="copy-btn" id="shareBtn" disabled>share</button><button type="button" class="copy-btn" id="nfcShareBtn" hidden disabled>nfc</button><button type="button" class="copy-btn" id="passwordBtn" disabled>password</button></div>
+          </div>
+          <div id="staticRow" style="display:none;">
+            <div class="r-label">static link</div>
+            <div class="r-val"><a id="static-url" class="r-link" style="font-size:11px;" target="_blank" rel="noopener"></a><button type="button" class="copy-btn" id="staticCopyBtn">copy</button></div>
           </div>
           <div>
             <div class="r-label">expires</div>

@@ -256,6 +256,15 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); font
 .upload-slug input[type=text]::placeholder { color: var(--muted); }
 .upload-slug input.error { border-color: var(--red, #ff4444); }
 .slug-error { display: block; margin-top: 4px; font-family: var(--mono); font-size: 10px; color: var(--red, #ff4444); min-height: 14px; }
+.upload-static { margin-top: 12px; display: flex; align-items: center; gap: 8px; }
+.upload-static-label { color: var(--muted); font-family: var(--mono); font-size: 10px; letter-spacing: 0.8px; text-transform: uppercase; cursor: pointer; user-select: none; }
+.upload-static-toggle { position: relative; display: inline-flex; align-items: center; cursor: pointer; }
+.upload-static-toggle input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.upload-static-switch { width: 32px; height: 18px; border-radius: 999px; background: var(--border2); position: relative; transition: background 0.16s; display: block; }
+.upload-static-switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); transition: transform 0.16s, background 0.16s; }
+.upload-static-toggle input:checked + .upload-static-switch { background: rgba(200,255,110,0.25); }
+.upload-static-toggle input:checked + .upload-static-switch::after { transform: translateX(14px); background: var(--green); }
+.upload-static-toggle input:focus-visible + .upload-static-switch { outline: 2px solid var(--green); outline-offset: 2px; }
 .upload-btn { display: block; width: 100%; margin-top: 12px; padding: 12px; background: var(--green); color: #080808; border: none; border-radius: 8px; font-family: var(--display); font-size: 14px; font-weight: 700; cursor: pointer; transition: opacity 0.15s; letter-spacing: -0.2px; }
 .upload-btn:hover { opacity: 0.85; }
 .upload-btn:active { opacity: 0.7; }
