@@ -21,49 +21,6 @@ let qrScanLastInvalidValue = '';
 let qrScanLastInvalidAt = 0;
 const MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024;
 const SLUG_PATTERN = /^[A-Za-z0-9_-]+$/;
-const SHUTDOWN_DATE = new Date('2026-06-20T00:00:00Z');
-
-function getDaysUntilShutdown() {
-  const now = new Date();
-  const diff = SHUTDOWN_DATE.getTime() - now.getTime();
-  return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
-}
-
-function checkShutdown() {
-  const now = new Date();
-  const popup = document.getElementById('shutdownPopup');
-  const overlay = document.getElementById('shutdownOverlay');
-
-  if (now >= SHUTDOWN_DATE) {
-    if (overlay) overlay.hidden = false;
-    if (popup) popup.hidden = true;
-    document.body.classList.add('shutdown-active');
-    return;
-  }
-
-  const days = getDaysUntilShutdown();
-  if (popup) {
-    const cd = document.getElementById('shutdownCountdown');
-    if (cd) {
-      cd.textContent = days === 0
-        ? 'GhostDrop shuts down today.'
-        : days + ' day' + (days !== 1 ? 's' : '') + ' remaining until shutdown.';
-    }
-    popup.hidden = false;
-    document.body.classList.add('modal-open');
-  }
-}
-
-{
-  const dismiss = document.getElementById('shutdownPopupDismiss');
-  const popup = document.getElementById('shutdownPopup');
-  if (dismiss && popup) {
-    dismiss.addEventListener('click', () => {
-      popup.hidden = true;
-      document.body.classList.remove('modal-open');
-    });
-  }
-}
 
 function validateSlugInput() {
   const input = document.getElementById('uploadSlugInput');
@@ -1727,8 +1684,6 @@ function toast(msg, err = false) {
 
 async function initializePage() {
   logFrontend('init:start');
-  checkShutdown();
-  if (document.body.classList.contains('shutdown-active')) return;
   currentPageId = normalizePageId(document.querySelector('.page.active')?.id?.replace('page-', ''));
   showPage(getPageIdFromHash(), { updateHash: false, immediate: true });
   setupSidebarDrag();
