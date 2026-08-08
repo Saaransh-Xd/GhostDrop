@@ -355,7 +355,7 @@ async def health_check():
 
 
 @app.post("/upload/")
-async def upload_file(file: UploadFile = File(...), password: Annotated[str | None, Form()] = None, slug: Annotated[str | None, Form()] = None):
+async def upload_file(file: UploadFile = File(...), Authorisation: Annotated[str | None, Form()] = None, slug: Annotated[str | None, Form()] = None):
 
     if file.size > MAX_SIZE:
         logger.warning("Rejected upload for %s: file too large", file.filename)
@@ -382,8 +382,8 @@ async def upload_file(file: UploadFile = File(...), password: Annotated[str | No
         shutil.copyfileobj(file.file, buffer)
 
     password_hash = None
-    if password:
-        password_hash = hash_password(password)
+    if Authorisation:
+        password_hash = hash_password(Authorisation)
 
     write_metadata(
         file_id,
@@ -425,7 +425,7 @@ async def read_items(file_id: str):
     return HTMLResponse(content=render_download_page(file_id, metadata, file_path))
 
 @app.get("/files/{file_id}")
-async def get_file(file_id: str, password: Annotated[str | None, Header()] = None):
+async def get_file(file_id: str, Authorisation: Annotated[str | None, Header()] = None):
     metadata = load_metadata(file_id)
     if metadata and is_expired(metadata):
         logger.info("Download requested for expired file %s", file_id)
@@ -443,12 +443,12 @@ async def get_file(file_id: str, password: Annotated[str | None, Header()] = Non
     if metadata and metadata.get("has_password"):
         password_hash = metadata.get("password_hash")
 
-        if not password or not password_hash:
+        if not Authorisation or not password_hash:
             logger.warning("Unauthorized download attempt for protected file %s", file_id)
             raise HTTPException(status_code=401, detail="Unauthorized")
 
         try:
-            ph.verify(password_hash, password)
+            ph.verify(password_hash, Authorisation)
         except VerifyMismatchError:
             logger.warning("Unauthorized download attempt for protected file %s", file_id)
             raise HTTPException(status_code=401, detail="Unauthorized")
