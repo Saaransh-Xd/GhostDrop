@@ -6,11 +6,7 @@ No accounts. No hassle. Just upload and share.
 
 ## Project Status
 
-GhostDrop ceased operations on June 20, 2026.
-
-Thank you to everyone who used, tested, and shared GhostDrop over its lifespan.
-
-its not done yet we would come back soon.......
+After 3 months of silence ghostdrop is back in business baby.
 
 <div align="center">
 A product by
