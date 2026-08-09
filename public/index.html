@@ -506,7 +506,7 @@ body.modal-open {
   <div class="api-wrap" id="api-wrap" >
     <span class="page-eyebrow">developer</span>
     <h2>API Reference</h2>
-    <span class="api-base">Base URL: <code>https://link.ghostdrop.qzz.io</code> &nbsp;·&nbsp; No auth &nbsp;·&nbsp; CORS open</span>
+    <span class="api-base">Base URL: <code>https://link.ghostdrop.qzz.io</code> &nbsp;·&nbsp; No account auth &nbsp;·&nbsp; Passwords protect individual resources &nbsp;·&nbsp; CORS open</span>
 
     <div class="ep">
       <div class="ep-head" onclick="toggleEp(this)">
@@ -521,6 +521,71 @@ body.modal-open {
           <button class="ccopy" onclick="cc(this)">copy</button><span class="cm">// 200 OK</span>
 { <span class="k">"files_stored"</span>: <span class="n">1</span>, <span class="k">"cpu_usage"</span>: <span class="s">"6.9%"</span>, <span class="k">"memory_usage"</span>: <span class="s">"63.9%"</span>, <span class="k">"uptime"</span>: <span class="s">"31.02 seconds"</span> }
         </div>
+      </div>
+    </div>
+
+    <div class="ep">
+      <div class="ep-head" onclick="toggleEp(this)">
+        <span class="method post">POST</span>
+        <span class="ep-path">/paste/add</span>
+        <span class="ep-hint">create a text paste</span>
+        <span class="chev">▶</span>
+      </div>
+      <div class="ep-body">
+        <p>Creates a text paste and returns a shareable link. Paste data is stored as UTF-8 text. A custom slug can be used instead of the generated six-character ID.</p>
+        <table class="ptbl">
+          <thead><tr><th>field</th><th>type</th><th>required</th><th>description</th></tr></thead>
+          <tbody>
+            <tr><td>data</td><td>string</td><td style="color:var(--green)">yes</td><td>text content to store</td></tr>
+            <tr><td>slug</td><td>string</td><td>no</td><td>custom ID with letters, numbers, hyphens, or underscores</td></tr>
+            <tr><td>password</td><td>string</td><td>no</td><td>optional password; stored server-side as a hash</td></tr>
+          </tbody>
+        </table>
+        <div class="code-blk"><button class="ccopy" onclick="cc(this)">copy</button>curl -X POST <span class="s">"https://link.ghostdrop.qzz.io/paste/add"</span> \
+  -H <span class="s">"Content-Type: application/json"</span> \
+  -d <span class="s">'{"data":"hello from GhostDrop","slug":"hello","password":"my-secret"}'</span></div>
+        <div class="code-blk"><button class="ccopy" onclick="cc(this)">copy</button><span class="cm">// 200 OK</span>
+{
+  <span class="k">"id"</span>: <span class="s">"hello"</span>,
+  <span class="k">"has_password"</span>: <span class="n">true</span>
+}
+<span class="cm">share link: https://link.ghostdrop.qzz.io/paste/hello</span></div>
+        <div class="code-blk"><span class="spill s400">400</span> { <span class="k">"error"</span>: <span class="s">"Request body must contain a string 'data' field"</span> }
+<span class="spill s409">409</span> { <span class="k">"error"</span>: <span class="s">"Paste slug already exists"</span> }
+<span class="spill s500">500</span> { <span class="k">"error"</span>: <span class="s">"Failed to create paste"</span> }</div>
+      </div>
+    </div>
+
+    <div class="ep">
+      <div class="ep-head" onclick="toggleEp(this)">
+        <span class="method get">GET</span>
+        <span class="ep-path">/paste/{paste_id}</span>
+        <span class="ep-hint">view paste page</span>
+        <span class="chev">▶</span>
+      </div>
+      <div class="ep-body">
+        <p>Returns the HTML paste viewer. Unprotected pastes display immediately. Password-protected pastes show a password form and load their contents after authentication.</p>
+        <div class="code-blk"><button class="ccopy" onclick="cc(this)">copy</button>curl <span class="s">"https://link.ghostdrop.qzz.io/paste/{paste_id}"</span></div>
+        <div class="code-blk"><span class="spill s200">200</span> HTML paste viewer
+<span class="spill s404">404</span> { <span class="k">"error"</span>: <span class="s">"Paste not found"</span> }</div>
+      </div>
+    </div>
+
+    <div class="ep">
+      <div class="ep-head" onclick="toggleEp(this)">
+        <span class="method get">GET</span>
+        <span class="ep-path">/paste/{paste_id}/raw</span>
+        <span class="ep-hint">read paste text</span>
+        <span class="chev">▶</span>
+      </div>
+      <div class="ep-body">
+        <p>Returns the raw UTF-8 paste contents. Password-protected pastes require the <code>X-Paste-Password</code> header. A password can also be supplied as the <code>password</code> query parameter, although the header is recommended because query strings may be logged.</p>
+        <div class="code-blk"><button class="ccopy" onclick="cc(this)">copy</button>curl <span class="s">"https://link.ghostdrop.qzz.io/paste/{paste_id}/raw"</span> \
+  -H <span class="s">"X-Paste-Password: my-secret"</span></div>
+        <div class="code-blk"><span class="spill s200">200</span> raw text content
+<span class="spill s401">401</span> { <span class="k">"error"</span>: <span class="s">"Paste password required"</span> }
+<span class="spill s404">404</span> { <span class="k">"error"</span>: <span class="s">"Paste not found"</span> }
+<span class="spill s500">500</span> { <span class="k">"error"</span>: <span class="s">"Failed to read paste"</span> }</div>
       </div>
     </div>
 
