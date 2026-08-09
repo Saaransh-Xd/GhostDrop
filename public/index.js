@@ -33,16 +33,14 @@ function getUploadDuration() {
 function updateUploadDuration() {
   const unitInput = document.getElementById('uploadDurationUnit');
   const durationInput = document.getElementById('uploadDurationInput');
-  const value = document.getElementById('uploadDurationValue');
   const limit = document.getElementById('uploadDurationLimit');
   const hint = document.getElementById('dropExpiryHint');
-  if (!unitInput || !durationInput || !value || !limit) return;
+  if (!unitInput || !durationInput || !limit) return;
   const unit = unitInput.value;
   const max = EXPIRY_LIMITS[unit];
   durationInput.max = max;
   if (Number(durationInput.value) > max) durationInput.value = max;
   const duration = Number(durationInput.value);
-  value.textContent = duration + ' ' + unit;
   limit.textContent = 'up to ' + max + ' ' + unit;
   if (hint) hint.textContent = 'max 100MB  · expires in ' + duration + ' ' + unit;
 }

@@ -244,16 +244,14 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); font
 .drop-label { font-family: var(--display); font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 5px; }
 .drop-sub { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .file-pill { display: none; margin-top: 12px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 7px; font-family: var(--mono); font-size: 11px; color: var(--green); text-align: left; word-break: break-all; }
-.upload-duration { margin-top: 10px; }
-.upload-duration-head { display: flex; align-items: center; justify-content: space-between; }
-.upload-duration-value { color: var(--green); font-family: var(--mono); font-size: 11px; }
-.upload-duration-controls { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.upload-duration { position: relative; display: flex; align-items: center; flex: 1; min-width: 0; margin-left: 18px; padding-bottom: 12px; gap: 10px; }
+.upload-duration-controls { display: flex; align-items: center; flex: 1; min-width: 0; gap: 12px; }
 .upload-duration input[type=range] { flex: 1; accent-color: var(--green); cursor: pointer; }
 .upload-duration select { appearance: none; min-width: 88px; background: #111 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%23c8ff6e' stroke-width='1.25' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 9px center; border: 1px solid var(--border2); border-radius: 8px; color: var(--text); font-family: var(--mono); font-size: 11px; padding: 8px 28px 8px 10px; cursor: pointer; outline: none; transition: border-color 0.16s, background-color 0.16s, box-shadow 0.16s; }
 .upload-duration select:hover { border-color: rgba(200,255,110,0.55); background-color: #151a10; }
 .upload-duration select:focus-visible { border-color: var(--green); box-shadow: 0 0 0 2px rgba(200,255,110,0.14); }
 .upload-duration select option { background: #111; color: var(--text); }
-.upload-duration-limit { margin-top: 5px; color: var(--muted); font-family: var(--mono); font-size: 9px; text-align: right; }
+.upload-duration-limit { position: absolute; right: 88px; bottom: 0; color: var(--muted); font-family: var(--mono); font-size: 9px; text-align: right; }
 .upload-password { margin-top: 12px; }
 .upload-password-label { display: block; margin-bottom: 6px; color: var(--muted); font-family: var(--mono); font-size: 10px; letter-spacing: 0.8px; text-transform: uppercase; }
 .upload-password input[type=password] { width: 100%; background: transparent; border: 1px solid var(--border2); border-radius: 7px; color: var(--text); font-family: var(--mono); font-size: 12px; padding: 10px 12px; outline: none; transition: border-color 0.15s; }
@@ -275,6 +273,10 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); font
 .upload-static-toggle input:checked + .upload-static-switch { background: rgba(200,255,110,0.25); }
 .upload-static-toggle input:checked + .upload-static-switch::after { transform: translateX(14px); background: var(--green); }
 .upload-static-toggle input:focus-visible + .upload-static-switch { outline: 2px solid var(--green); outline-offset: 2px; }
+@media (max-width: 520px) {
+  .upload-static { align-items: flex-start; }
+  .upload-duration { margin-left: 12px; }
+}
 .upload-btn { display: block; width: 100%; margin-top: 12px; padding: 12px; background: var(--green); color: #080808; border: none; border-radius: 8px; font-family: var(--display); font-size: 14px; font-weight: 700; cursor: pointer; transition: opacity 0.15s; letter-spacing: -0.2px; }
 .upload-btn:hover { opacity: 0.85; }
 .upload-btn:active { opacity: 0.7; }
