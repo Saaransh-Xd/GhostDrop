@@ -1,0 +1,14 @@
+{
+  "Version": "13.0.0",
+  "Name": "GhostDrop",
+  "DestinationType": "FileUploader",
+  "RequestMethod": "POST",
+  "RequestURL": "https://link.ghostdrop.qzz.io/upload/",
+  "Body": "MultipartFormData",
+  "Arguments": {
+    "duration": "6",
+    "duration_unit": "hours"
+  },
+  "FileFormName": "file",
+  "URL": "https://link.ghostdrop.qzz.io/$json:id$"
+}
