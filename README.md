@@ -1,12 +1,10 @@
 <img src="assets/banner.png" alt="Banner" width="100%">
 
-GhostDrop is a fast and simple file sharing service that lets you upload files and instantly get a shareable link.
+GhostDrop is a fast, simple, and lightweight sharing service for files, folders, and text.
 
-No accounts. No hassle. Just upload and share.
+Upload files, create text pastes, share folders, use custom slugs, protect your uploads with passwords, and get a shareable link instantly.
 
-## Project Status
-
-After 3 months of silence ghostdrop is back in business baby.
+No accounts. No unnecessary BS. upload, paste, and share.
 
 <div align="center">
 A product by
