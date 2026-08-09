@@ -375,6 +375,7 @@ body.modal-open {
   <button type="button" class="sidebar-drag-handle" id="sidebarDragHandle" aria-label="Drag navigation">::</button>
   <span class="sidebar-indicator" id="sidebarIndicator" aria-hidden="true"></span>
   <a onclick="showPage('main')" class="active" id="snav-main">upload</a>
+  <a onclick="showPage('paste')" id="snav-paste">paste</a>
  <!-- <a onclick="showPage('scan')" id="snav-scan">scan</a> -->
   <a onclick="showPage('api')" id="snav-api">api</a>
   <a onclick="showPage('tos')" id="snav-tos">terms</a>
@@ -450,6 +451,49 @@ body.modal-open {
             <div class="r-label">expires</div>
             <div class="expiry-track"><div class="expiry-fill" id="expiryFill"></div></div>
             <div class="expiry-time" id="expiryTime">6h 0m</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PASTE -->
+<div class="page" id="page-paste">
+  <div class="main-wrap">
+    <div class="main-inner paste-inner">
+      <div class="wordmark">Ghost<em>Drop</em></div>
+      <div class="paste-heading">
+        <span class="page-eyebrow">quick share</span>
+        <h2>Paste text</h2>
+        <p>Write something and get a short paste ID.</p>
+      </div>
+      <form id="pasteForm" class="paste-form">
+        <label class="paste-label" for="pasteInput">your paste</label>
+        <textarea id="pasteInput" class="paste-input" rows="12" placeholder="type or paste text here…" spellcheck="true" required></textarea>
+        <div class="paste-options">
+          <div class="upload-slug">
+            <label class="upload-slug-label" for="pasteSlugInput">Custom slug (optional)</label>
+            <input type="text" id="pasteSlugInput" placeholder="custom identifier for this paste">
+            <span class="slug-error" id="pasteSlugError"></span>
+          </div>
+          <div class="upload-password">
+            <label class="upload-password-label" for="pastePasswordInput">Password (optional)</label>
+            <input type="password" id="pastePasswordInput" placeholder="protect this paste">
+          </div>
+        </div>
+        <div class="paste-form-footer">
+          <span class="paste-count" id="pasteCount">0 characters</span>
+          <button type="submit" class="upload-btn paste-btn" id="pasteBtn">create paste</button>
+        </div>
+      </form>
+      <div class="paste-result" id="pasteResult" hidden>
+        <div class="result-top">paste created</div>
+        <div class="paste-result-body">
+          <div class="r-label">share link</div>
+          <div class="paste-id-row">
+            <a id="pasteUrl" class="r-link" target="_blank" rel="noopener"></a>
+            <button type="button" class="copy-btn" id="pasteCopyBtn">copy</button>
           </div>
         </div>
       </div>

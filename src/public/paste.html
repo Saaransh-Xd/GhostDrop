@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GhostDrop Paste</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/paste.css">
+</head>
+<body>
+  <main class="paste-wrap">
+    <section class="paste-card">
+      <a class="home-link" href="https://ghostdrop.qzz.io">← GhostDrop</a>
+      <div class="eyebrow">text share</div>
+      <h1>Ghost<em>Drop</em></h1>
+      <p class="paste-id">paste / __PASTE_ID__</p>
+
+      <div class="password-panel" id="passwordPanel" hidden>
+        <h2>password required</h2>
+        <p>This paste is protected. Enter its password to view the contents.</p>
+        <form id="passwordForm">
+          <input id="passwordInput" type="password" placeholder="enter password" autocomplete="current-password" required>
+          <button type="submit">unlock paste</button>
+        </form>
+      </div>
+
+      <p class="status" id="status" aria-live="polite">loading paste…</p>
+      <pre class="paste-content" id="pasteContent" hidden></pre>
+    </section>
+  </main>
+  <script>
+    const pasteId = "__PASTE_ID__";
+    const rawUrl = "/paste/" + encodeURIComponent(pasteId) + "/raw";
+    const statusNode = document.getElementById("status");
+    const contentNode = document.getElementById("pasteContent");
+    const passwordPanel = document.getElementById("passwordPanel");
+    const passwordInput = document.getElementById("passwordInput");
+
+    function setStatus(message, error = false) {
+      statusNode.textContent = message;
+      statusNode.classList.toggle("error", error);
+    }
+
+    async function loadPaste(password = "") {
+      const options = password ? { headers: { "X-Paste-Password": password } } : {};
+      const response = await fetch(rawUrl, options);
+      if (response.status === 401) {
+        passwordPanel.hidden = false;
+        setStatus(password ? "invalid password" : "");
+        passwordInput.focus();
+        return;
+      }
+      if (!response.ok) {
+        let message = "Unable to load paste";
+        try { message = (await response.json()).error || message; } catch (_) {}
+        throw new Error(message);
+      }
+      contentNode.textContent = await response.text();
+      contentNode.hidden = false;
+      passwordPanel.hidden = true;
+      setStatus("");
+    }
+
+    document.getElementById("passwordForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      setStatus("unlocking paste…");
+      try {
+        await loadPaste(passwordInput.value);
+        passwordInput.value = "";
+      } catch (error) {
+        setStatus(error.message || "Invalid password", true);
+      }
+    });
+
+    loadPaste().catch((error) => setStatus(error.message || "Unable to load paste", true));
+  </script>
+</body>
+</html>

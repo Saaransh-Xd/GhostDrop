@@ -71,7 +71,7 @@ function validateSlugInput() {
   return true;
 }
 
-const PAGE_IDS = ['main', 'scan', 'api', 'changelog', 'tos', 'privacy'];
+const PAGE_IDS = ['main', 'paste', 'scan', 'api', 'changelog', 'tos', 'privacy'];
 const PAGE_TRANSITION_MS = 220;
 const reduceMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 const SIDEBAR_SETTLE_VELOCITY_THRESHOLD = 0.55;
@@ -1301,6 +1301,74 @@ async function proceedWithUpload(password = '') {
   }
 }
 
+async function createPaste(event) {
+  event?.preventDefault();
+  const input = document.getElementById('pasteInput');
+  const button = document.getElementById('pasteBtn');
+  const result = document.getElementById('pasteResult');
+  const urlNode = document.getElementById('pasteUrl');
+  const pasteData = input?.value ?? '';
+  const slugInput = document.getElementById('pasteSlugInput');
+  const slugError = document.getElementById('pasteSlugError');
+  const slug = slugInput?.value.trim() ?? '';
+  const password = document.getElementById('pastePasswordInput')?.value ?? '';
+
+  if (!pasteData.trim()) {
+    toast('write something first', true);
+    input?.focus();
+    return;
+  }
+  if (!BASE) {
+    toast('server url not ready yet', true);
+    return;
+  }
+  if (slug && (slug.length < 2 || !SLUG_PATTERN.test(slug))) {
+    if (slugError) slugError.textContent = 'Only letters, numbers, hyphens and underscores allowed';
+    slugInput?.classList.add('error');
+    toast('fix the paste slug before creating', true);
+    return;
+  }
+  if (slugError) slugError.textContent = '';
+  slugInput?.classList.remove('error');
+
+  if (button) {
+    button.disabled = true;
+    button.innerHTML = '<span class="spin"></span>creating…';
+  }
+
+  try {
+    const response = await fetch(BASE + '/paste/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: pasteData, slug: slug || undefined, password: password || undefined }),
+    });
+    const responseData = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(responseData.error || responseData.detail || 'paste creation failed');
+    }
+
+    const pasteUrl = BASE.replace(/\/$/, '') + '/paste/' + encodeURIComponent(responseData.id);
+    if (urlNode) {
+      urlNode.textContent = pasteUrl;
+      urlNode.href = pasteUrl;
+    }
+    if (slugInput) slugInput.value = '';
+    const passwordInput = document.getElementById('pastePasswordInput');
+    if (passwordInput) passwordInput.value = '';
+    if (result) result.hidden = false;
+    toast(responseData.has_password ? 'password-protected paste created' : 'paste created');
+    logFrontend('paste:success', { id: responseData.id, characters: pasteData.length });
+  } catch (error) {
+    toast(error.message || 'paste creation failed', true);
+    logFrontend('paste:error', { message: error.message });
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'create paste';
+    }
+  }
+}
+
 async function reupload() {
   if (tries >= 3) {
     toast('upload failed after multiple attempts', true);
@@ -1923,6 +1991,45 @@ async function initializePage() {
       }
       applyFileSelectionUI();
       logFrontend('folder:toggle', { folderMode: computeFolderMode(), count: selectedFiles.length });
+    });
+  }
+
+  const pasteForm = document.getElementById('pasteForm');
+  if (pasteForm) {
+    pasteForm.addEventListener('submit', createPaste);
+  }
+
+  const pasteInput = document.getElementById('pasteInput');
+  const pasteCount = document.getElementById('pasteCount');
+  if (pasteInput && pasteCount) {
+    pasteInput.addEventListener('input', () => {
+      pasteCount.textContent = pasteInput.value.length + ' characters';
+    });
+  }
+
+  const pasteSlugInput = document.getElementById('pasteSlugInput');
+  if (pasteSlugInput) {
+    pasteSlugInput.addEventListener('input', () => {
+      const error = document.getElementById('pasteSlugError');
+      const value = pasteSlugInput.value.trim();
+      const valid = !value || (value.length >= 2 && SLUG_PATTERN.test(value));
+      pasteSlugInput.classList.toggle('error', !valid);
+      if (error) error.textContent = valid ? '' : 'Only letters, numbers, hyphens and underscores allowed';
+    });
+  }
+
+  const pasteCopyBtn = document.getElementById('pasteCopyBtn');
+  if (pasteCopyBtn) {
+    pasteCopyBtn.addEventListener('click', async () => {
+      const pasteUrl = document.getElementById('pasteUrl')?.href;
+      if (!pasteUrl) return;
+      try {
+        await navigator.clipboard.writeText(pasteUrl);
+        pasteCopyBtn.textContent = 'copied';
+        window.setTimeout(() => { pasteCopyBtn.textContent = 'copy'; }, 1400);
+      } catch {
+        toast('unable to copy paste id', true);
+      }
     });
   }
 

@@ -14,7 +14,7 @@ import uuid
 from urllib.parse import quote
 from datetime import datetime, time, timedelta, timezone
 from fastapi import FastAPI, File, Form, Header, Query, Request, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from starlette.background import BackgroundTask
@@ -108,6 +108,8 @@ DOWNLOAD_TEMPLATE_PATH = SRC_DIR / "public" / "download.html"
 DOWNLOAD_STYLES_PATH = SRC_DIR / "public" / "download.css"
 FOLDER_TEMPLATE_PATH = SRC_DIR / "public" / "folder.html"
 FOLDER_STYLES_PATH = SRC_DIR / "public" / "folder.css"
+PASTE_TEMPLATE_PATH = SRC_DIR / "public" / "paste.html"
+PASTE_STYLES_PATH = SRC_DIR / "public" / "paste.css"
 FOLDER_ID_PREFIX = "f"
 FOLDER_COOKIE = "ghostdrop_folder"
 FOLDER_COOKIE_MAX_AGE = 6 * 3600
@@ -196,6 +198,52 @@ def build_embed_description(original_name: str, size_bytes: int | None, views: i
         "This file was uploaded by a user. Download only if you trust the source."
     )
 
+def write_paste(paste_data: str, paste_id: str) -> Path:
+    """Write a paste and return the path of the created file."""
+    paste_dir = UPLOAD_DIR / "pastes"
+    paste_dir.mkdir(parents=True, exist_ok=True)
+    paste_file_path = paste_dir / f"{paste_id}.txt"
+
+    # Exclusive creation prevents a collision from overwriting an existing paste.
+    file_created = False
+    try:
+        with paste_file_path.open("x", encoding="utf-8") as paste_file:
+            file_created = True
+            paste_file.write(paste_data)
+    except OSError:
+        # Do not leave a partial paste behind if writing fails.
+        if file_created:
+            paste_file_path.unlink(missing_ok=True)
+        raise
+
+    return paste_file_path
+
+
+def paste_metadata_path(paste_id: str) -> Path:
+    return UPLOAD_DIR / "pastes" / f"{paste_id}.json"
+
+
+def create_paste(
+    paste_id: str,
+    paste_data: str,
+    password_hash: str | None = None,
+) -> str:
+    """Create a paste, store its access metadata, and return its id."""
+    paste_file_path = write_paste(paste_data, paste_id)
+    metadata_path = paste_metadata_path(paste_id)
+    metadata_created = False
+    try:
+        with metadata_path.open("x", encoding="utf-8") as metadata_file:
+            metadata_created = True
+            json.dump({"password_hash": password_hash}, metadata_file)
+    except OSError:
+        paste_file_path.unlink(missing_ok=True)
+        if metadata_created:
+            metadata_path.unlink(missing_ok=True)
+        raise
+
+    logger.info("Stored paste %s", paste_id)
+    return paste_id
 
 def write_metadata(
     file_id: str,
@@ -255,7 +303,12 @@ def generate_file_id(slug: str | None = None, length: int = 6) -> str:
 
 
 def id_in_use(file_id: str) -> bool:
-    return metadata_path(file_id).exists() or (UPLOAD_DIR / file_id).exists()
+    return (
+        metadata_path(file_id).exists()
+        or (UPLOAD_DIR / file_id).exists()
+        or (UPLOAD_DIR / "pastes" / f"{file_id}.txt").exists()
+        or paste_metadata_path(file_id).exists()
+    )
 
 
 def validate_slug_input(slug: str) -> None:
@@ -680,6 +733,61 @@ async def folder_styles():
     return FileResponse(FOLDER_STYLES_PATH)
 
 
+@app.get("/paste.css")
+async def paste_styles():
+    return FileResponse(PASTE_STYLES_PATH)
+
+
+@app.get("/paste/{paste_id}", response_class=HTMLResponse)
+async def get_paste(paste_id: str):
+    if not SLUG_PATTERN.fullmatch(paste_id):
+        raise HTTPException(status_code=404, detail="Paste not found")
+
+    paste_file_path = UPLOAD_DIR / "pastes" / f"{paste_id}.txt"
+    if not paste_file_path.is_file():
+        raise HTTPException(status_code=404, detail="Paste not found")
+
+    try:
+        template = PASTE_TEMPLATE_PATH.read_text(encoding="utf-8")
+        return HTMLResponse(template.replace("__PASTE_ID__", paste_id))
+    except OSError:
+        logger.exception("Failed to render paste %s", paste_id)
+        raise HTTPException(status_code=500, detail="Failed to load paste")
+
+
+@app.get("/paste/{paste_id}/raw", response_class=PlainTextResponse)
+async def get_paste_raw(
+    paste_id: str,
+    password: Annotated[str | None, Query()] = None,
+    header_password: Annotated[str | None, Header(alias="X-Paste-Password")] = None,
+):
+    if not SLUG_PATTERN.fullmatch(paste_id):
+        raise HTTPException(status_code=404, detail="Paste not found")
+
+    paste_file_path = UPLOAD_DIR / "pastes" / f"{paste_id}.txt"
+    if not paste_file_path.is_file():
+        raise HTTPException(status_code=404, detail="Paste not found")
+
+    try:
+        metadata = json.loads(paste_metadata_path(paste_id).read_text(encoding="utf-8"))
+        password_hash = metadata.get("password_hash")
+        supplied_password = header_password or password
+        if password_hash:
+            if not supplied_password:
+                raise HTTPException(status_code=401, detail="Paste password required")
+            try:
+                ph.verify(password_hash, supplied_password)
+            except VerifyMismatchError:
+                raise HTTPException(status_code=401, detail="Invalid paste password")
+
+        return PlainTextResponse(paste_file_path.read_text(encoding="utf-8"))
+    except HTTPException:
+        raise
+    except OSError:
+        logger.exception("Failed to read paste %s", paste_id)
+        raise HTTPException(status_code=500, detail="Failed to read paste")
+
+
 @app.get("/{file_id}", response_class=HTMLResponse)
 async def read_items(file_id: str, request: Request):
     metadata = load_metadata(file_id)
@@ -936,6 +1044,44 @@ async def delete_file(file_id: str, password: Annotated[str | None, Header()] = 
         cleanup_file(file_id)
         logging.info("Deleted file %s via API", file_id)
         return {"detail": "File deleted"}
+
+@app.post("/paste/add")
+async def add_paste(request: Request) -> dict[str, str | bool]:
+    try:
+        request_data = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise HTTPException(status_code=400, detail="Request body must be valid JSON")
+
+    if not isinstance(request_data, dict) or not isinstance(request_data.get("data"), str):
+        raise HTTPException(status_code=400, detail="Request body must contain a string 'data' field")
+
+    slug = request_data.get("slug")
+    password = request_data.get("password")
+    if slug is not None and not isinstance(slug, str):
+        raise HTTPException(status_code=400, detail="Paste slug must be a string")
+    if password is not None and not isinstance(password, str):
+        raise HTTPException(status_code=400, detail="Paste password must be a string")
+    if slug:
+        validate_slug_input(slug)
+        if id_in_use(slug):
+            raise HTTPException(status_code=409, detail="Paste slug already exists")
+
+    paste_id = generate_file_id(slug)
+    password_hash = hash_password(password) if password else None
+
+    try:
+        created_paste_id = create_paste(paste_id, request_data["data"], password_hash)
+    except FileExistsError:
+        logger.warning("Paste id collision for %s", paste_id)
+        raise HTTPException(status_code=409, detail="Paste id already exists")
+    except OSError:
+        logger.exception("Failed to create paste %s", paste_id)
+        raise HTTPException(status_code=500, detail="Failed to create paste")
+
+    return {
+        "id": created_paste_id,
+        "has_password": bool(password_hash),
+    }
 
 @app.exception_handler(404)
 async def custom_404_handler(request: Request, exc):
