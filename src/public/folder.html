@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GhostDrop Folder</title>
+<meta property="og:title" content="GhostDrop - Secure Folder Download">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://ghostdrop.qzz.io/favicon.ico">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="GhostDrop - Secure Folder Download">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<link rel="stylesheet" href="/folder.css">
+</head>
+<body>
+<div class="status-belt" aria-label="Download notice">
+  <div class="status-belt-track">
+    <div class="status-belt-item"><strong>Notice:</strong> These files were uploaded by a user. Download only if you trust the source. &nbsp;///&nbsp;</div>
+    <div class="status-belt-item"><strong>Notice:</strong> These files were uploaded by a user. Download only if you trust the source. &nbsp;///&nbsp;</div>
+    <div class="status-belt-item"><strong>Notice:</strong> These files were uploaded by a user. Download only if you trust the source. &nbsp;///&nbsp;</div>
+    <div class="status-belt-item"><strong>Notice:</strong> These files were uploaded by a user. Download only if you trust the source. &nbsp;///&nbsp;</div>
+  </div>
+</div>
+
+<div class="top-links">
+  <a class="top-link main-link" href="https://ghostdrop.qzz.io">
+    <i class="fa-solid fa-house" aria-hidden="true"></i>
+    Home
+  </a>
+  <a class="top-link gh-link" href="https://github.com/SaaranshDx/GhostDrop.git" target="_blank" rel="noopener">
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+    github
+  </a>
+</div>
+
+<main class="folder-wrap">
+  <section class="folder-content">
+    <div class="card-eyebrow">folder gateway</div>
+    <h1 class="folder-title">Ghost<em>Drop</em></h1>
+    <p class="folder-lead" id="folderLead">This folder was shared by a user. Only continue if you trust whoever sent you this link.</p>
+
+    <div class="folder-password hidden" id="passwordBlock">
+      <label class="password-label" for="passwordInput">password required</label>
+      <input class="password-input" id="passwordInput" type="password" placeholder="enter the folder password">
+      <p class="password-note" id="passwordNote">This folder is protected. Enter the password once — the gateway remembers it for this session.</p>
+      <button class="password-btn" id="passwordBtn" type="button">unlock folder</button>
+    </div>
+
+    <div class="folder-meta" aria-label="Folder details">
+      <div class="meta-item meta-item-wide">
+        <div class="meta-label">folder id</div>
+        <div class="meta-value" id="folderIdValue">__FOLDER_ID__</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-label">files</div>
+        <div class="meta-value" id="folderCountValue">__FILE_COUNT__</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-label">expires</div>
+        <div class="meta-value" id="folderExpiryValue">__FOLDER_EXPIRY__</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-label">views</div>
+        <div class="meta-value" id="folderViewsValue">__FOLDER_VIEWS__</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-label">access</div>
+        <div class="meta-value" id="folderAccessValue">__FOLDER_HAS_PASSWORD__</div>
+      </div>
+    </div>
+
+    <div class="folder-files hidden" id="filesBlock">
+      <div class="files-toolbar">
+        <label class="select-all">
+          <input type="checkbox" id="selectAllCheckbox">
+          <span>select all</span>
+        </label>
+        <div class="files-actions">
+          <button class="folder-dl-btn" id="downloadSelectedBtn" type="button" disabled>download selected (<span id="selectedCount">0</span>)</button>
+          <a class="folder-dl-link" id="downloadAllLink" href="">download all (.zip)</a>
+        </div>
+      </div>
+      <div class="files-list" id="filesList"></div>
+    </div>
+
+    <p class="folder-status hidden" id="folderStatus" aria-live="polite"></p>
+    <p class="folder-note" id="folderNote">Files are served from the download gateway. Expired or missing files will return an error from the backend.</p>
+  </section>
+</main>
+
+<script>
+  const folderId = "__FOLDER_ID__";
+  const folderIdUrl = "__FOLDER_ID_URL__";
+  const folderFiles = __FOLDER_FILES__;
+  const folderHasPassword = "__FOLDER_HAS_PASSWORD__" === "true";
+  const folderAuthorized = "__FOLDER_AUTHORIZED__" === "true";
+
+  const passwordBlock = document.getElementById("passwordBlock");
+  const passwordInput = document.getElementById("passwordInput");
+  const passwordBtn = document.getElementById("passwordBtn");
+  const passwordNote = document.getElementById("passwordNote");
+  const filesBlock = document.getElementById("filesBlock");
+  const filesList = document.getElementById("filesList");
+  const selectAllCheckbox = document.getElementById("selectAllCheckbox");
+  const downloadSelectedBtn = document.getElementById("downloadSelectedBtn");
+  const downloadAllLink = document.getElementById("downloadAllLink");
+  const selectedCount = document.getElementById("selectedCount");
+  const folderStatus = document.getElementById("folderStatus");
+  const folderLead = document.getElementById("folderLead");
+  const folderAccessValue = document.getElementById("folderAccessValue");
+
+  function setStatus(message, isError = false) {
+    folderStatus.textContent = message;
+    folderStatus.classList.remove("hidden", "error");
+    if (isError) {
+      folderStatus.classList.add("error");
+    }
+  }
+
+  function formatFileSize(sizeBytes) {
+    if (sizeBytes == null || Number.isNaN(Number(sizeBytes))) {
+      return "";
+    }
+    const size = Number(sizeBytes);
+    if (size < 1024) return `${size} B`;
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function escapeHtml(value) {
+    const div = document.createElement("div");
+    div.textContent = String(value == null ? "" : value);
+    return div.innerHTML;
+  }
+
+  function renderFiles() {
+    filesList.innerHTML = "";
+    folderFiles.forEach((file) => {
+      const row = document.createElement("div");
+      row.className = "file-row";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.className = "file-check";
+      checkbox.dataset.fileId = file.id;
+      checkbox.addEventListener("change", updateSelectedCount);
+
+      const name = document.createElement("span");
+      name.className = "file-name";
+      name.textContent = file.name;
+      name.title = file.name;
+
+      const size = document.createElement("span");
+      size.className = "file-size";
+      size.textContent = formatFileSize(file.size_bytes);
+
+      const download = document.createElement("a");
+      download.className = "file-dl";
+      download.href = `/folder/${encodeURIComponent(folderIdUrl)}/files/${encodeURIComponent(file.id)}`;
+      download.title = "download this file";
+      download.innerHTML = '<i class="fa-solid fa-download" aria-hidden="true"></i>';
+      download.addEventListener("click", () => setStatus("Downloading " + file.name + "…"));
+
+      row.append(checkbox, name, size, download);
+      filesList.appendChild(row);
+    });
+  }
+
+  function updateSelectedCount() {
+    const checked = filesList.querySelectorAll(".file-check:checked");
+    selectedCount.textContent = String(checked.length);
+    downloadSelectedBtn.disabled = checked.length === 0;
+  }
+
+  selectAllCheckbox.addEventListener("change", () => {
+    filesList.querySelectorAll(".file-check").forEach((checkbox) => {
+      checkbox.checked = selectAllCheckbox.checked;
+    });
+    updateSelectedCount();
+  });
+
+  downloadSelectedBtn.addEventListener("click", () => {
+    const selected = Array.from(filesList.querySelectorAll(".file-check:checked"))
+      .map((checkbox) => checkbox.dataset.fileId);
+    if (selected.length === 0) return;
+    setStatus("Downloading " + selected.length + " file(s)…");
+    window.location.href = `/folder/${encodeURIComponent(folderIdUrl)}/download?files=${selected.map(encodeURIComponent).join(",")}`;
+  });
+
+  async function unlockFolder() {
+    const password = passwordInput.value;
+    passwordBtn.disabled = true;
+    passwordNote.textContent = "Checking password…";
+
+    try {
+      const response = await fetch(`/folder/${encodeURIComponent(folderIdUrl)}/auth`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ password }),
+      });
+
+      if (!response.ok) {
+        passwordNote.textContent = "Wrong password. Please try again.";
+        passwordBtn.disabled = false;
+        passwordInput.focus();
+        return;
+      }
+
+      passwordNote.textContent = "Folder unlocked. Reloading…";
+      window.location.reload();
+    } catch (error) {
+      passwordNote.textContent = "Unable to reach the gateway: " + error.message;
+      passwordBtn.disabled = false;
+    }
+  }
+
+  passwordBtn.addEventListener("click", unlockFolder);
+  passwordInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      unlockFolder();
+    }
+  });
+
+  function initFolderPage() {
+    folderAccessValue.textContent = folderHasPassword ? "password protected" : "open link";
+
+    if (folderHasPassword && !folderAuthorized) {
+      passwordBlock.classList.remove("hidden");
+      passwordInput.focus();
+      folderLead.textContent = "This folder is password protected. Enter the password to unlock the file list.";
+      folderNote.textContent = "The gateway caches the password for this session, so you only enter it once.";
+      return;
+    }
+
+    if (folderHasPassword && folderAuthorized) {
+      folderLead.textContent = "Folder unlocked. Select files to download.";
+    }
+
+    renderFiles();
+    filesBlock.classList.remove("hidden");
+    downloadAllLink.href = `/folder/${encodeURIComponent(folderIdUrl)}/download`;
+    updateSelectedCount();
+  }
+
+  initFolderPage();
+</script>
+</body>
+</html>

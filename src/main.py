@@ -1,17 +1,23 @@
 from pathlib import Path
 from html import escape
+import base64
+import hashlib
+import hmac
 import json
 import logging
 import re
 import shutil
+import tempfile
+import zipfile
 from typing_extensions import Annotated
 import uuid
 from urllib.parse import quote
 from datetime import datetime, time, timedelta, timezone
-from fastapi import FastAPI, File, Form, Header, Request, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, Query, Request, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from starlette.background import BackgroundTask
 import uvicorn
 import os
 import time
@@ -34,6 +40,44 @@ ph = PasswordHasher()
 
 def hash_password(password: str) -> str:
     return ph.hash(password)
+
+def _b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+def _b64url_decode(data: str) -> bytes:
+    return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+
+def create_folder_token(folder_id: str, ttl_seconds: int | None = None) -> str:
+    if ttl_seconds is None:
+        ttl_seconds = FOLDER_COOKIE_MAX_AGE
+    payload = json.dumps({
+        "fid": folder_id,
+        "exp": utc_now().timestamp() + ttl_seconds,
+    }).encode()
+    signature = hmac.new(SERVER_SECRET, payload, hashlib.sha256).digest()
+    return _b64url_encode(payload) + "." + _b64url_encode(signature)
+
+def verify_folder_token(token: str | None, folder_id: str) -> bool:
+    if not token or "." not in token:
+        return False
+
+    try:
+        payload_b64, signature_b64 = token.rsplit(".", 1)
+        payload = _b64url_decode(payload_b64)
+        signature = _b64url_decode(signature_b64)
+    except (ValueError, TypeError):
+        return False
+
+    expected = hmac.new(SERVER_SECRET, payload, hashlib.sha256).digest()
+    if not hmac.compare_digest(signature, expected):
+        return False
+
+    try:
+        data = json.loads(payload)
+    except (ValueError, TypeError):
+        return False
+
+    return data.get("fid") == folder_id and data.get("exp", 0) > utc_now().timestamp()
 
 def configure_logging() -> logging.Logger:
     log_level_name = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -62,6 +106,12 @@ UPLOAD_DIR = Path("uploads")
 METADATA_DIR = Path("uploads_meta")
 DOWNLOAD_TEMPLATE_PATH = SRC_DIR / "public" / "download.html"
 DOWNLOAD_STYLES_PATH = SRC_DIR / "public" / "download.css"
+FOLDER_TEMPLATE_PATH = SRC_DIR / "public" / "folder.html"
+FOLDER_STYLES_PATH = SRC_DIR / "public" / "folder.css"
+FOLDER_ID_PREFIX = "f"
+FOLDER_COOKIE = "ghostdrop_folder"
+FOLDER_COOKIE_MAX_AGE = 6 * 3600
+SERVER_SECRET = (os.getenv("GHOSTDROP_SECRET") or secrets.token_hex(32)).encode()
 MAX_SIZE = 100 * 1024 * 1024  # 100MB
 SLUG_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 RESERVED_SLUGS = {
@@ -96,7 +146,10 @@ def cleanup_file(file_id: str) -> None:
     file_path = UPLOAD_DIR / file_id
     metadata_file = metadata_path(file_id)
 
-    if file_path.exists():
+    if file_path.is_dir():
+        shutil.rmtree(file_path)
+        logger.info("Deleted uploaded folder %s", file_id)
+    elif file_path.exists():
         file_path.unlink()
         logger.info("Deleted uploaded file %s", file_id)
     if metadata_file.exists():
@@ -200,6 +253,72 @@ def generate_file_id(slug: str | None = None, length: int = 6) -> str:
     alphabet = string.ascii_letters + string.digits
     return ''.join(secrets.choice(alphabet) for _ in range(length))
 
+
+def id_in_use(file_id: str) -> bool:
+    return metadata_path(file_id).exists() or (UPLOAD_DIR / file_id).exists()
+
+
+def validate_slug_input(slug: str) -> None:
+    slug_lower = slug.lower()
+    if not SLUG_PATTERN.fullmatch(slug):
+        raise HTTPException(status_code=400, detail="Slug can only contain letters, numbers, hyphens and underscores")
+    if slug_lower in RESERVED_SLUGS:
+        raise HTTPException(status_code=400, detail="That slug is reserved and cannot be used")
+    if len(slug) < 2:
+        raise HTTPException(status_code=400, detail="Slug must be at least 2 characters long")
+
+
+def validate_duration(duration: int | None, duration_unit: str | None) -> int:
+    duration_unit = (duration_unit or "hours").lower()
+    max_duration = EXPIRY_LIMITS.get(duration_unit)
+    if max_duration is None or duration is None or duration < 1 or duration > max_duration:
+        limits = ", ".join(f"{unit}: 1-{limit}" for unit, limit in EXPIRY_LIMITS.items())
+        raise HTTPException(status_code=400, detail=f"Duration must be between 1 and the maximum for its unit ({limits})")
+    return duration * {"hours": 1, "days": 24, "weeks": 168}[duration_unit]
+
+
+def generate_folder_id(slug: str | None = None) -> str:
+    if slug:
+        return slug
+
+    for _ in range(20):
+        candidate = FOLDER_ID_PREFIX + ''.join(
+            secrets.choice(string.ascii_letters + string.digits) for _ in range(5)
+        )
+        if not id_in_use(candidate):
+            return candidate
+
+    raise HTTPException(status_code=500, detail="Failed to allocate folder id")
+
+
+def is_folder_authorized(folder_id: str, metadata: dict, request: Request, password: str | None = None) -> bool:
+    if not metadata.get("has_password"):
+        return True
+
+    if verify_folder_token(request.cookies.get(FOLDER_COOKIE), folder_id):
+        return True
+
+    password_hash = metadata.get("password_hash")
+    if password and password_hash:
+        try:
+            ph.verify(password_hash, password)
+            return True
+        except VerifyMismatchError:
+            return False
+
+    return False
+
+
+def load_folder(folder_id: str) -> dict:
+    metadata = load_metadata(folder_id)
+    if not metadata or metadata.get("type") != "folder":
+        raise HTTPException(status_code=404, detail="Folder not found")
+    if is_expired(metadata):
+        logger.info("Requested expired folder %s", folder_id)
+        cleanup_file(folder_id)
+        raise HTTPException(status_code=410, detail=EXPIRED_MESSAGE)
+    return metadata
+
 def cleanup_expired_files() -> None:
     deleted_files = 0
     for path in METADATA_DIR.glob("*.json"):
@@ -255,6 +374,44 @@ def render_download_page(file_id: str, metadata: dict, file_path: Path) -> str:
     ).replace(
         "__EMBED_DESCRIPTION__",
         embed_description,
+    )
+
+
+def render_folder_page(folder_id: str, metadata: dict, request: Request) -> str:
+    quoted_folder_id = quote(folder_id, safe="")
+    has_password = metadata.get("has_password", False)
+    authorized = not has_password
+    if has_password:
+        authorized = verify_folder_token(request.cookies.get(FOLDER_COOKIE), folder_id)
+
+    files = metadata.get("files", []) if authorized else []
+    files_json = json.dumps(files, ensure_ascii=False)
+    files_json = files_json.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+
+    return FOLDER_TEMPLATE_PATH.read_text(encoding="utf-8").replace(
+        "__FOLDER_ID_URL__",
+        quoted_folder_id,
+    ).replace(
+        "__FOLDER_ID__",
+        escape(folder_id),
+    ).replace(
+        "__FOLDER_HAS_PASSWORD__",
+        "true" if has_password else "false",
+    ).replace(
+        "__FOLDER_AUTHORIZED__",
+        "true" if authorized else "false",
+    ).replace(
+        "__FOLDER_FILES__",
+        files_json,
+    ).replace(
+        "__FOLDER_EXPIRY__",
+        escape(format_expiry_label(metadata.get("expires_at"))),
+    ).replace(
+        "__FOLDER_VIEWS__",
+        escape(str(metadata.get("views", 0))),
+    ).replace(
+        "__FILE_COUNT__",
+        str(len(metadata.get("files", []))),
     )
 
 
@@ -363,19 +520,14 @@ async def health_check():
 async def upload_file(
     file: UploadFile = File(...),
     Authorisation: Annotated[str | None, Form()] = None,
+    password: Annotated[str | None, Form()] = None,
     slug: Annotated[str | None, Form()] = None,
     is_static: Annotated[bool | None, Form()] = False,
     duration: Annotated[int | None, Form()] = EXPIRY_HOURS,
     duration_unit: Annotated[str | None, Form()] = "hours",
 ):
 
-    duration_unit = (duration_unit or "hours").lower()
-    max_duration = EXPIRY_LIMITS.get(duration_unit)
-    if max_duration is None or duration is None or duration < 1 or duration > max_duration:
-        limits = ", ".join(f"{unit}: 1-{limit}" for unit, limit in EXPIRY_LIMITS.items())
-        raise HTTPException(status_code=400, detail=f"Duration must be between 1 and the maximum for its unit ({limits})")
-
-    duration_hours = duration * {"hours": 1, "days": 24, "weeks": 168}[duration_unit]
+    duration_hours = validate_duration(duration, duration_unit)
     expiry_duration = timedelta(hours=duration_hours)
 
     if file.size > MAX_SIZE:
@@ -383,13 +535,7 @@ async def upload_file(
         raise HTTPException(status_code=413, detail="File too large")
     
     if slug:
-        slug_lower = slug.lower()
-        if not SLUG_PATTERN.fullmatch(slug):
-            raise HTTPException(status_code=400, detail="Slug can only contain letters, numbers, hyphens and underscores")
-        if slug_lower in RESERVED_SLUGS:
-            raise HTTPException(status_code=400, detail="That slug is reserved and cannot be used")
-        if len(slug) < 2:
-            raise HTTPException(status_code=400, detail="Slug must be at least 2 characters long")
+        validate_slug_input(slug)
 
     cleanup_expired_files()
 
@@ -403,8 +549,9 @@ async def upload_file(
         shutil.copyfileobj(file.file, buffer)
 
     password_hash = None
-    if Authorisation:
-        password_hash = hash_password(Authorisation)
+    auth_value = Authorisation or password
+    if auth_value:
+        password_hash = hash_password(auth_value)
 
     write_metadata(
         file_id,
@@ -430,13 +577,111 @@ async def upload_file(
     return response
 
 
+@app.post("/folder/")
+async def upload_folder(
+    files: Annotated[list[UploadFile], File(...)],
+    Authorisation: Annotated[str | None, Form()] = None,
+    password: Annotated[str | None, Form()] = None,
+    slug: Annotated[str | None, Form()] = None,
+    duration: Annotated[int | None, Form()] = EXPIRY_HOURS,
+    duration_unit: Annotated[str | None, Form()] = "hours",
+):
+
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    duration_hours = validate_duration(duration, duration_unit)
+
+    if slug:
+        validate_slug_input(slug)
+
+    cleanup_expired_files()
+
+    folder_id = generate_folder_id(slug)
+
+    if slug and id_in_use(slug):
+        raise HTTPException(status_code=409, detail="Slug already in use")
+
+    folder_dir = UPLOAD_DIR / folder_id
+    folder_dir.mkdir(exist_ok=False)
+
+    file_entries = []
+    try:
+        for uploaded in files:
+            file_id = generate_file_id()
+            for _ in range(10):
+                if not (folder_dir / file_id).exists():
+                    break
+                file_id = generate_file_id()
+
+            dest = folder_dir / file_id
+            size = 0
+            with open(dest, "wb") as buffer:
+                while True:
+                    chunk = uploaded.file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > MAX_SIZE:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"File too large: {uploaded.filename or file_id}",
+                        )
+                    buffer.write(chunk)
+
+            file_entries.append({
+                "id": file_id,
+                "name": uploaded.filename or file_id,
+                "size_bytes": size,
+            })
+    except HTTPException:
+        shutil.rmtree(folder_dir, ignore_errors=True)
+        raise
+    except Exception:
+        shutil.rmtree(folder_dir, ignore_errors=True)
+        logger.exception("Folder upload failed for %s", folder_id)
+        raise HTTPException(status_code=500, detail="Folder upload failed")
+
+    password_hash = None
+    auth_value = Authorisation or password
+    if auth_value:
+        password_hash = hash_password(auth_value)
+
+    metadata = {
+        "type": "folder",
+        "password_hash": password_hash,
+        "has_password": password_hash is not None,
+        "expires_at": (utc_now() + timedelta(hours=duration_hours)).isoformat(),
+        "views": 0,
+        "is_static": False,
+        "files": file_entries,
+    }
+    metadata_path(folder_id).write_text(json.dumps(metadata), encoding="utf-8")
+    logger.info("Stored folder %s with %s file(s)", folder_id, len(file_entries))
+
+    return {
+        "id": folder_id,
+        "type": "folder",
+        "file_count": len(file_entries),
+        "files": [{"id": entry["id"], "name": entry["name"]} for entry in file_entries],
+        "expires_in_hours": duration_hours,
+        "duration": duration,
+        "duration_unit": duration_unit,
+    }
+
+
 @app.get("/download.css")
 async def download_styles():
     return FileResponse(DOWNLOAD_STYLES_PATH)
 
 
+@app.get("/folder.css")
+async def folder_styles():
+    return FileResponse(FOLDER_STYLES_PATH)
+
+
 @app.get("/{file_id}", response_class=HTMLResponse)
-async def read_items(file_id: str):
+async def read_items(file_id: str, request: Request):
     metadata = load_metadata(file_id)
     if metadata and is_expired(metadata):
         logger.info("Landing page requested for expired file %s", file_id)
@@ -445,8 +690,17 @@ async def read_items(file_id: str):
             status_code=410,
         )
 
+    if not metadata:
+        logger.warning("Landing page requested for missing file %s", file_id)
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if metadata.get("type") == "folder":
+        increment_views(file_id, metadata)
+        logger.info("Rendering folder page for %s", file_id)
+        return HTMLResponse(content=render_folder_page(file_id, metadata, request))
+
     file_path = UPLOAD_DIR / file_id
-    if not metadata or not file_path.exists():
+    if not file_path.exists():
         logger.warning("Landing page requested for missing file %s", file_id)
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -484,9 +738,120 @@ async def server_satic_file(file_id: str):
         path=file_path,
         media_type=media_type or "application/octet-stream",
     )
+
+@app.post("/folder/{folder_id}/auth")
+async def authorize_folder(
+    folder_id: str,
+    password: Annotated[str | None, Form()] = None,
+):
+    metadata = load_folder(folder_id)
+
+    if not metadata.get("has_password"):
+        return {"ok": True}
+
+    if not password or not metadata.get("password_hash"):
+        logger.warning("Unauthorized folder auth attempt for %s", folder_id)
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    try:
+        ph.verify(metadata["password_hash"], password)
+    except VerifyMismatchError:
+        logger.warning("Wrong password for folder %s", folder_id)
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    token = create_folder_token(folder_id)
+    response = JSONResponse({"ok": True})
+    response.set_cookie(
+        key=FOLDER_COOKIE,
+        value=token,
+        max_age=FOLDER_COOKIE_MAX_AGE,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+    logger.info("Folder %s authorized", folder_id)
+    return response
+
+
+@app.get("/folder/{folder_id}/files/{file_id}")
+async def download_folder_file(
+    folder_id: str,
+    file_id: str,
+    request: Request,
+    Authorisation: Annotated[str | None, Header()] = None,
+    password: Annotated[str | None, Header()] = None,
+):
+    metadata = load_folder(folder_id)
+
+    if not is_folder_authorized(folder_id, metadata, request, Authorisation or password):
+        logger.warning("Unauthorized folder file download attempt %s/%s", folder_id, file_id)
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    entry = next((entry for entry in metadata.get("files", []) if entry["id"] == file_id), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    path = UPLOAD_DIR / folder_id / file_id
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    logger.info("Serving folder file %s from %s as %s", file_id, folder_id, entry["name"])
+    return FileResponse(path=path, filename=entry["name"])
+
+
+@app.get("/folder/{folder_id}/download")
+async def download_folder_files(
+    folder_id: str,
+    request: Request,
+    files: Annotated[str | None, Query()] = None,
+    Authorisation: Annotated[str | None, Header()] = None,
+    password: Annotated[str | None, Header()] = None,
+):
+    metadata = load_folder(folder_id)
+
+    if not is_folder_authorized(folder_id, metadata, request, Authorisation or password):
+        logger.warning("Unauthorized folder download attempt %s", folder_id)
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    entries = metadata.get("files", [])
+    if files:
+        selected_ids = {item for item in files.split(",") if item}
+        entries = [entry for entry in entries if entry["id"] in selected_ids]
+        if not entries:
+            raise HTTPException(status_code=400, detail="No matching files")
+
+    if not entries:
+        raise HTTPException(status_code=404, detail="Folder is empty")
+
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+    temp_path = temp_file.name
+    temp_file.close()
+
+    try:
+        with zipfile.ZipFile(temp_path, "w", zipfile.ZIP_DEFLATED) as archive:
+            for entry in entries:
+                path = UPLOAD_DIR / folder_id / entry["id"]
+                if path.exists():
+                    archive.write(path, arcname=entry["name"])
+    except Exception:
+        os.unlink(temp_path)
+        raise
+
+    zip_name = f"{folder_id}_files.zip"
+    logger.info("Serving %s file(s) from folder %s as %s", len(entries), folder_id, zip_name)
+    return FileResponse(
+        path=temp_path,
+        media_type="application/zip",
+        filename=zip_name,
+        background=BackgroundTask(os.unlink, temp_path),
+    )
     
 @app.get("/files/{file_id}")
-async def get_file(file_id: str, Authorisation: Annotated[str | None, Header()] = None):
+async def get_file(
+    file_id: str,
+    Authorisation: Annotated[str | None, Header()] = None,
+    password: Annotated[str | None, Header()] = None,
+):
     metadata = load_metadata(file_id)
     if metadata and is_expired(metadata):
         logger.info("Download requested for expired file %s", file_id)
@@ -497,6 +862,10 @@ async def get_file(file_id: str, Authorisation: Annotated[str | None, Header()] 
         )
 
     file_path = UPLOAD_DIR / file_id
+    if metadata and metadata.get("type") == "folder":
+        logger.warning("Download requested for folder via file route %s", file_id)
+        raise HTTPException(status_code=404, detail="File not found")
+
     if not file_path.exists():
         logger.warning("Download requested for missing file %s", file_id)
         raise HTTPException(status_code=404, detail="File not found")
@@ -504,12 +873,14 @@ async def get_file(file_id: str, Authorisation: Annotated[str | None, Header()] 
     if metadata and metadata.get("has_password"):
         password_hash = metadata.get("password_hash")
 
-        if not Authorisation or not password_hash:
+        auth_value = Authorisation or password
+
+        if not auth_value or not password_hash:
             logger.warning("Unauthorized download attempt for protected file %s", file_id)
             raise HTTPException(status_code=401, detail="Unauthorized")
 
         try:
-            ph.verify(password_hash, Authorisation)
+            ph.verify(password_hash, auth_value)
         except VerifyMismatchError:
             logger.warning("Unauthorized download attempt for protected file %s", file_id)
             raise HTTPException(status_code=401, detail="Unauthorized")
@@ -534,6 +905,19 @@ async def get_metadata(file_id: str):
         )
 
     logger.info("Metadata retrieved for %s", file_id)
+    if metadata.get("type") == "folder":
+        return {
+            "type": "folder",
+            "file_count": len(metadata.get("files", [])),
+            "files": [
+                {"id": entry["id"], "name": entry["name"], "size_bytes": entry.get("size_bytes")}
+                for entry in metadata.get("files", [])
+            ],
+            "expires_at": metadata["expires_at"],
+            "views": metadata.get("views", 0),
+            "has_password": metadata.get("has_password", False),
+        }
+
     return {
         "original_name": metadata["original_name"],
         "size_bytes": metadata.get("size_bytes"),
@@ -549,8 +933,7 @@ async def delete_file(file_id: str, password: Annotated[str | None, Header()] = 
         logger.warning("Unauthorized delete attempt for file %s", file_id)
         raise HTTPException(status_code=401, detail="Unauthorized")
     else:
-        os.remove(UPLOAD_DIR / file_id)
-        os.remove(metadata_path(file_id))
+        cleanup_file(file_id)
         logging.info("Deleted file %s via API", file_id)
         return {"detail": "File deleted"}
 

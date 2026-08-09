@@ -1,6 +1,7 @@
 let tries = 0;
 let BASE = '';
-let selectedFile = null;
+let selectedFiles = [];
+let folderMode = false;
 let latestUploadedFile = null;
 let pendingUpload = false;
 let expiryTimer = null;
@@ -624,39 +625,132 @@ async function startNfcReceive() {
   }
 }
 
-function setSelectedFile(file) {
-  const pill = document.getElementById('filePill');
-  const uploadBtn = document.getElementById('uploadBtn');
+function computeFolderMode() {
+  const folderInput = document.getElementById('uploadFolderInput');
+  return Boolean(selectedFiles.length > 1 || (folderInput && folderInput.checked));
+}
 
+function renderFileList() {
+  const list = document.getElementById('fileList');
+  if (!list) {
+    return;
+  }
+
+  list.innerHTML = '';
+  selectedFiles.forEach((file, index) => {
+    const row = document.createElement('div');
+    row.className = 'file-list-row';
+
+    const name = document.createElement('span');
+    name.className = 'file-list-name';
+    name.textContent = file.name;
+    name.title = file.name;
+
+    const size = document.createElement('span');
+    size.className = 'file-list-size';
+    size.textContent = fmtBytes(file.size);
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'file-list-remove';
+    remove.textContent = '×';
+    remove.title = 'remove';
+    remove.addEventListener('click', () => {
+      const next = selectedFiles.slice();
+      next.splice(index, 1);
+      setSelectedFiles(next);
+    });
+
+    row.append(name, size, remove);
+    list.appendChild(row);
+  });
+
+  list.hidden = false;
+  logFrontend('files:list-rendered', { count: selectedFiles.length });
+}
+
+function applyFileSelectionUI() {
+  const pill = document.getElementById('filePill');
+  const list = document.getElementById('fileList');
+  const uploadBtn = document.getElementById('uploadBtn');
+  const folderInput = document.getElementById('uploadFolderInput');
+  const folderRow = document.querySelector('.upload-folder');
+  const staticInput = document.getElementById('uploadStaticInput');
+  const staticToggle = staticInput?.closest('.upload-static-toggle');
+  const staticLabel = document.querySelector('.upload-static-label[for="uploadStaticInput"]');
   if (!pill || !uploadBtn) {
     return;
   }
 
-  if (!file) {
-    selectedFile = null;
+  const hasMultipleFiles = selectedFiles.length > 1;
+  if (folderRow) {
+    folderRow.hidden = !hasMultipleFiles;
+  }
+  if (!hasMultipleFiles && folderInput) {
+    folderInput.checked = false;
+  }
+  if (staticInput) {
+    staticInput.disabled = hasMultipleFiles;
+    if (hasMultipleFiles) staticInput.checked = false;
+  }
+  staticToggle?.classList.toggle('is-disabled', hasMultipleFiles);
+  staticLabel?.classList.toggle('is-disabled', hasMultipleFiles);
+
+  folderMode = computeFolderMode();
+
+  if (selectedFiles.length === 0) {
     pill.style.display = 'none';
     pill.textContent = '';
+    if (list) {
+      list.innerHTML = '';
+      list.hidden = true;
+    }
     uploadBtn.disabled = true;
-    logFrontend('file:cleared');
+    logFrontend('files:cleared');
     return;
   }
-
-  if (file.size > MAX_FILE_SIZE_BYTES) {
-    selectedFile = null;
-    pill.style.display = 'none';
-    pill.textContent = '';
-    uploadBtn.disabled = true;
-    toast('file too large (max 100MB)', true);
-    logFrontend('file:rejected', { name: file.name, size: file.size, reason: 'too-large' });
-    return;
-  }
-
-  selectedFile = file;
 
   pill.style.display = 'block';
-  pill.textContent = file.name + '  ·  ' + fmtBytes(file.size);
   uploadBtn.disabled = false;
-  logFrontend('file:selected', { name: file.name, size: file.size, type: file.type || 'unknown' });
+
+  if (selectedFiles.length === 1 && !folderMode) {
+    pill.textContent = selectedFiles[0].name + '  ·  ' + fmtBytes(selectedFiles[0].size);
+    if (list) {
+      list.innerHTML = '';
+      list.hidden = true;
+    }
+  } else {
+    pill.textContent = selectedFiles.length + ' file(s) selected · ' + (folderMode ? 'folder link' : 'multiple files');
+    renderFileList();
+  }
+}
+
+function setSelectedFiles(files) {
+  const uploadBtn = document.getElementById('uploadBtn');
+  const folderInput = document.getElementById('uploadFolderInput');
+
+  selectedFiles = files || [];
+
+  const oversized = selectedFiles.find((file) => file.size > MAX_FILE_SIZE_BYTES);
+  if (oversized) {
+    selectedFiles = [];
+    if (uploadBtn) uploadBtn.disabled = true;
+    applyFileSelectionUI();
+    toast('"' + oversized.name + '" is too large (max 100MB per file)', true);
+    logFrontend('files:rejected', { name: oversized.name, size: oversized.size, reason: 'too-large' });
+    return;
+  }
+
+  if (selectedFiles.length === 0) {
+    if (folderInput) folderInput.checked = false;
+  } else if (selectedFiles.length > 1) {
+    if (folderInput) folderInput.checked = true;
+  } else {
+    if (folderInput) folderInput.checked = false;
+  }
+
+  applyFileSelectionUI();
+  logFrontend('files:selected', { count: selectedFiles.length, folderMode: computeFolderMode() });
 }
 
 function normalizePageId(id) {
@@ -1026,9 +1120,9 @@ function showPage(id, options = {}) {
 }
 
 function onFileSelect() {
-  const f = document.getElementById('fileInput').files[0];
-  logFrontend('file:input-change', { hasFile: Boolean(f) });
-  setSelectedFile(f);
+  const files = Array.from(document.getElementById('fileInput').files || []);
+  logFrontend('file:input-change', { hasFiles: files.length > 0, count: files.length });
+  setSelectedFiles(files);
 }
 
 function fmtBytes(b) {
@@ -1049,14 +1143,15 @@ function fmtTime(s) {
 
 async function uploadFile(event) {
   event?.preventDefault();
-  if (!selectedFile) {
-    logFrontend('upload:skipped', { reason: 'no-file' });
+  if (selectedFiles.length === 0) {
+    logFrontend('upload:skipped', { reason: 'no-files' });
     return;
   }
-  if (selectedFile.size > MAX_FILE_SIZE_BYTES) {
-    const oversizedFile = selectedFile;
-    toast('file too large (max 100MB)', true);
-    setSelectedFile(null);
+  const oversized = selectedFiles.find((file) => file.size > MAX_FILE_SIZE_BYTES);
+  if (oversized) {
+    const oversizedFile = oversized;
+    toast('"' + oversizedFile.name + '" is too large (max 100MB)', true);
+    setSelectedFiles([]);
     logFrontend('upload:blocked', { reason: 'too-large', size: oversizedFile.size, name: oversizedFile.name });
     return;
   }
@@ -1072,7 +1167,7 @@ async function uploadFile(event) {
 }
 
 async function proceedWithUpload(password = '') {
-  if (!selectedFile || !BASE) {
+  if (selectedFiles.length === 0 || !BASE) {
     return;
   }
   
@@ -1088,10 +1183,15 @@ async function proceedWithUpload(password = '') {
     toast('fix the slug before uploading', true);
     return;
   }
+  const isFolder = computeFolderMode();
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span>uploading…';
   const fd = new FormData();
-  fd.append('file', selectedFile);
+  if (isFolder) {
+    selectedFiles.forEach((file) => fd.append('files', file));
+  } else {
+    fd.append('file', selectedFiles[0]);
+  }
   if (slug) {
     fd.append('slug', slug);
   }
@@ -1100,23 +1200,24 @@ async function proceedWithUpload(password = '') {
   }
   const staticInput = document.getElementById('uploadStaticInput');
   const isStatic = staticInput?.checked === true;
-  if (isStatic) {
+  if (isStatic && !isFolder) {
     fd.append('is_static', 'true');
   }
   const uploadDuration = getUploadDuration();
   fd.append('duration', String(uploadDuration.duration));
   fd.append('duration_unit', uploadDuration.unit);
   logFrontend('upload:start', {
-    name: selectedFile.name,
-    size: selectedFile.size,
+    name: selectedFiles[0]?.name,
+    count: selectedFiles.length,
+    folder: isFolder,
     hasSlug: Boolean(slug),
     hasPassword: Boolean(password),
-    isStatic,
+    isStatic: isStatic && !isFolder,
     duration: uploadDuration.duration,
     durationUnit: uploadDuration.unit,
   });
   try {
-    const res = await fetch(BASE + '/upload/', {
+    const res = await fetch(BASE + (isFolder ? '/folder/' : '/upload/'), {
       method: 'POST',
       body: fd,
     });
@@ -1134,7 +1235,7 @@ async function proceedWithUpload(password = '') {
       } else {
         toast(msg, true);
       }
-      logFrontend('upload:server-rejected', { status: res.status, message: msg });
+      logFrontend('upload:server-rejected', { status: res.status, message: msg, folder: isFolder });
       return;
     }
     const url = 'https://link.ghostdrop.qzz.io' + '/' + data.id;
@@ -1142,7 +1243,7 @@ async function proceedWithUpload(password = '') {
     urlNode.textContent = url;
     urlNode.href = url;
     const staticRow = document.getElementById('staticRow');
-    if (staticRow && data.static_url) {
+    if (staticRow && data.static_url && !isFolder) {
       const staticUrl = BASE.replace(/\/$/, '') + '/' + data.static_url.replace(/^\/+/, '');
       const staticNode = document.getElementById('static-url');
       staticNode.textContent = staticUrl;
@@ -1153,7 +1254,7 @@ async function proceedWithUpload(password = '') {
     }
     latestUploadedFile = {
       id: data.id,
-      originalName: data.original_name,
+      originalName: isFolder ? data.file_count + ' files' : data.original_name,
       expiresInHours: data.expires_in_hours,
       url,
       staticUrl: data.static_url ? BASE.replace(/\/$/, '') + '/' + data.static_url.replace(/^\/+/, '') : null,
@@ -1162,8 +1263,12 @@ async function proceedWithUpload(password = '') {
     updateNfcControls();
     document.getElementById('resultCard').style.display = 'block';
     document.getElementById('fileInput').value = '';
-    document.getElementById('filePill').style.display = 'none';
-    document.getElementById('filePill').textContent = '';
+    selectedFiles = [];
+    const folderInputReset = document.getElementById('uploadFolderInput');
+    if (folderInputReset) {
+      folderInputReset.checked = false;
+    }
+    applyFileSelectionUI();
     if (slugInput) {
       slugInput.value = '';
       slugInput.classList.remove('error');
@@ -1174,7 +1279,6 @@ async function proceedWithUpload(password = '') {
     }
     const slugErrorEl = document.getElementById('slugError');
     if (slugErrorEl) slugErrorEl.textContent = '';
-    selectedFile = null;
     shareFile(url);
     startExpiry(data.expires_in_hours * 3600);
     navigator.clipboard?.writeText(url).catch(() => {});
@@ -1182,7 +1286,8 @@ async function proceedWithUpload(password = '') {
     logFrontend('upload:success', {
       id: data.id,
       status: res.status,
-      originalName: data.original_name,
+      folder: isFolder,
+      fileCount: data.file_count,
       expiresInHours: data.expires_in_hours,
     });
 
@@ -1190,9 +1295,9 @@ async function proceedWithUpload(password = '') {
     toast('error: ' + e.message, true);
     logFrontend('upload:error', { message: e.message });
   } finally {
-    btn.disabled = !selectedFile;
+    btn.disabled = selectedFiles.length === 0;
     btn.textContent = 'upload';
-    logFrontend('upload:complete', { pendingFile: Boolean(selectedFile) });
+    logFrontend('upload:complete', { pendingFiles: selectedFiles.length });
   }
 }
 
@@ -1624,7 +1729,7 @@ function hidePasswordPopup() {
 }
 
 function skipPasswordPopup() {
-  const shouldProceedWithUpload = pendingUpload && selectedFile;
+  const shouldProceedWithUpload = pendingUpload && selectedFiles.length > 0;
   hidePasswordPopup();
   
   // Proceed with upload without password
@@ -1639,7 +1744,7 @@ function submitPasswordPopup() {
   logFrontend('password-popup:submit', { hasPassword: Boolean(password) });
   
   // Check if we were waiting for password input before uploading
-  const shouldProceedWithUpload = pendingUpload && selectedFile;
+  const shouldProceedWithUpload = pendingUpload && selectedFiles.length > 0;
   
   hidePasswordPopup();
   
@@ -1806,6 +1911,21 @@ async function initializePage() {
     slugInput.addEventListener('input', validateSlugInput);
   }
 
+  const folderInput = document.getElementById('uploadFolderInput');
+  if (folderInput) {
+    folderInput.addEventListener('change', () => {
+      folderMode = folderInput.checked;
+      if (selectedFiles.length === 0) {
+        return;
+      }
+      if (selectedFiles.length === 1 && folderMode) {
+        renderFileList();
+      }
+      applyFileSelectionUI();
+      logFrontend('folder:toggle', { folderMode: computeFolderMode(), count: selectedFiles.length });
+    });
+  }
+
   const durationInput = document.getElementById('uploadDurationInput');
   const durationUnit = document.getElementById('uploadDurationUnit');
   if (durationInput) durationInput.addEventListener('input', updateUploadDuration);
@@ -1842,9 +1962,9 @@ async function initializePage() {
     dz.addEventListener('drop', (e) => {
       e.preventDefault();
       dz.classList.remove('dragover');
-      const f = e.dataTransfer.files[0];
-      logFrontend('dropzone:drop', { hasFile: Boolean(f) });
-      setSelectedFile(f);
+      const files = Array.from(e.dataTransfer.files || []);
+      logFrontend('dropzone:drop', { count: files.length });
+      setSelectedFiles(files);
     });
   }
 

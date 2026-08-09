@@ -387,17 +387,26 @@ body.modal-open {
     <div class="main-inner">
       <div class="wordmark">Ghost<em>Drop</em></div>
       <div class="drop-zone" id="dropZone">
-        <input type="file" id="fileInput" onchange="onFileSelect()">
+        <input type="file" id="fileInput" onchange="onFileSelect()" multiple>
         <span class="drop-arrow">
           <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
             <path d="M14 4v14M8 12l6 6 6-6" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
             <path d="M5 22h18" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
         </span>
-        <p class="drop-label">drop a file or click to browse</p>
-        <p class="drop-sub" id="dropExpiryHint">max 100MB  &middot; expires in 6 hours</p>
+        <p class="drop-label">drop files or click to browse</p>
+        <p class="drop-sub" id="dropExpiryHint">max 100MB per file &middot; multiple files make a folder link</p>
       </div>
       <div class="file-pill" id="filePill"></div>
+      <div class="file-list" id="fileList" hidden></div>
+      <div class="upload-folder" hidden>
+        <label class="upload-static-toggle" for="uploadFolderInput">
+          <input type="checkbox" id="uploadFolderInput">
+          <span class="upload-static-switch" aria-hidden="true"></span>
+        </label>
+        <label class="upload-static-label" for="uploadFolderInput">folder</label>
+        <span class="upload-folder-hint" id="uploadFolderHint">1 link &middot; select files to download</span>
+      </div>
       <div class="upload-slug">
         <label class="upload-slug-label" for="uploadSlugInput">Custom slug (optional) </label>
         <input type="text" id="uploadSlugInput" placeholder="custom identifier for this file">
