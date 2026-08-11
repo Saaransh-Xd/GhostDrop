@@ -300,47 +300,45 @@ body.modal-open {
   <div class="release-popup__card">
     <div class="release-popup__content">
       <span class="release-popup__eyebrow">Release update</span>
-      <h2 id="releasePopupTitle">GhostDrop v1.4</h2>
-      <p class="release-popup__lead" id="releasePopupDescription">This update introduces custom slugs, password-protected uploads, QR code scanning, Docker support, and a completely reworked download page experience.</p>
+      <h2 id="releasePopupTitle">GhostDrop v1.5</h2>
+      <p class="release-popup__lead" id="releasePopupDescription">GhostDrop v1.5 expands the service with faster sharing workflows, richer upload controls, improved API support, and broader client compatibility.</p>
 
       <div class="release-popup__grid">
         <section class="release-popup__section" aria-labelledby="releaseFeatures">
           <h3 id="releaseFeatures">Features</h3>
           <ul>
-            <li>Custom Slugs — Upload files with a custom identifier instead of a random string, with format validation and reserved slug protection</li>
-            <li>Password Protection — Optionally protect uploaded files with a password; stored securely using Argon2 hashing</li>
-            <li>File Metadata — Download page now shows file name, size, view count, and expiry time with Discord embed support</li>
-            <li>QR Code Scanning — Built-in QR scanner to quickly open shared file links from other devices</li>
-            <li>Share Popup — Dedicated share UI with direct link, QR code, and NFC sharing options</li>
-            <li>Client Page & Installers — New client download page with Windows install script and Android APK support</li>
-            <li>Debug Overlay — Developer debug panel with real-time frontend event logging</li>
-            <li>Docker Support — Official Dockerfile for easy self-hosted deployment</li>
+            <li>Quick Text Pastes — Create and share text pastes directly with optional password protection</li>
+            <li>Folder Uploads — Upload folders with a dedicated browsing and download experience</li>
+            <li>Configurable Retention — Choose upload retention in hours, days, or weeks</li>
+            <li>Static Links — Create uploads with persistent static links</li>
+            <li>Custom Slugs — Upload files using custom identifiers with validation and reserved-slug protection</li>
+            <li>ShareX Integration — Ready-to-import GhostDrop.sxcu configuration for direct uploads through ShareX</li>
           </ul>
         </section>
 
         <section class="release-popup__section" aria-labelledby="releaseImprovements">
           <h3 id="releaseImprovements">Improvements</h3>
           <ul>
-            <li>Download Page — Complete overhaul with file metadata display (name, size, views, expiry) and smoother animations</li>
-            <li>Slug Validation — Real-time input validation with inline error messages and reserved slug list</li>
-            <li>Error Handling — Granular HTTP error codes (400, 409, 413) with frontend-specific error toasts and inline feedback</li>
-            <li>API Robustness — Fixed slug header/form mismatch and server URL resolution for reliable operation behind proxies</li>
+            <li>Password Handling — Improved password handling across upload and download endpoints</li>
+            <li>API Documentation — Updated API docs with the new endpoints, parameters, and base URL handling</li>
+            <li>API Upload Limits — Removed the previous 4.5 MB API body-size limitation, allowing larger uploads</li>
+            <li>Upload Flow — Refined the frontend upload experience with configurable retention controls</li>
+            <li>Styling & Docs — Updated frontend styling, logging, documentation, and the general upload workflow</li>
           </ul>
         </section>
 
         <section class="release-popup__section" aria-labelledby="releaseFixes">
           <h3 id="releaseFixes">Fixes</h3>
           <ul>
-            <li>Slug Upload — Fixed slug not being received by backend (Header → Form data migration)</li>
-            <li>Dev Server Leak — Fixed backend resolving to dev server URL in production builds</li>
-            <li>Docker Build — Fixed broken dependency file path in Docker image</li>
-            <li>File Overwrite — Added conflict detection: uploading with an existing slug now returns 409 instead of silently overwriting</li>
+            <li>Server URL Handling — Improved API base URL handling for deployments behind reverse proxies</li>
+            <li>Upload Compatibility — Improved compatibility between the frontend, API, and external upload clients</li>
+            <li>Password-Protected Resources — Improved consistency when accessing protected uploads and pastes</li>
           </ul>
         </section>
       </div>
 
       <div class="release-popup__footer">
-        <p class="release-popup__note">Note: all mobile apps would be automatically updated</p>
+        <p class="release-popup__note">Note: default retention stays 6 hours &middot; existing mobile clients update automatically to the v1.4 format</p>
         <button type="button" class="release-popup__button" id="releasePopupDismiss">Okay</button>
       </div>
     </div>
@@ -977,7 +975,7 @@ function gtag(){dataLayer.push(arguments);}
 gtag('js', new Date());
 
 gtag('config', 'G-RBQ1FSXXQG');
-const RELEASE_POPUP_COOKIE = 'ghostdrop_release_v1_4_seen';
+const RELEASE_POPUP_COOKIE = 'ghostdrop_release_v1_5_seen';
 
 function setReleasePopupCookie(name, value, days) {
   const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toUTCString();
