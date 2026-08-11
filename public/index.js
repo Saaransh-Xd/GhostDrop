@@ -898,6 +898,7 @@ function isMobileNavLayout() {
 
 function resetSidebarForMobile() {
   const sidebar = document.querySelector('.sidebar');
+  const handle = document.getElementById('sidebarDragHandle');
   if (!sidebar) {
     return;
   }
@@ -919,6 +920,8 @@ function resetSidebarForMobile() {
   sidebar.style.removeProperty('--sidebar-settle-angle');
   sidebar.style.removeProperty('--sidebar-settle-direction');
   delete sidebar.dataset.dragged;
+  sidebar.classList.remove('is-menu-open');
+  handle?.setAttribute('aria-expanded', 'false');
 }
 
 function setupSidebarDrag() {
@@ -929,7 +932,7 @@ function setupSidebarDrag() {
   }
 
   handle.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0 || isMobileNavLayout()) {
+    if (event.button !== 0) {
       return;
     }
 
@@ -943,6 +946,7 @@ function setupSidebarDrag() {
       lastTime: event.timeStamp,
       velocityX: 0,
       directionX: 1,
+      moved: false,
     };
 
     if (sidebarSettleCleanup) {
@@ -964,7 +968,7 @@ function setupSidebarDrag() {
   });
 
   handle.addEventListener('pointermove', (event) => {
-    if (!sidebarDragState || event.pointerId !== sidebarDragState.pointerId || isMobileNavLayout()) {
+    if (!sidebarDragState || event.pointerId !== sidebarDragState.pointerId) {
       return;
     }
 
@@ -978,6 +982,7 @@ function setupSidebarDrag() {
     sidebarDragState.lastTime = event.timeStamp;
 
     if (Math.abs(deltaX) > 0.2 || Math.abs(deltaY) > 0.2) {
+      sidebarDragState.moved = true;
       if (Math.abs(deltaX) > 0.2) {
         sidebarDragState.directionX = deltaX > 0 ? 1 : -1;
         setSidebarDragDirection(sidebarDragState.directionX);
@@ -1012,6 +1017,10 @@ function setupSidebarDrag() {
     setSidebarMotionActive(false);
     setSidebarIdleActive(false);
     sidebar.classList.remove('is-dragging');
+    if (sidebarDragState?.moved || sidebar.dataset.dragged === 'true') {
+      sidebar.dataset.dragMoved = 'true';
+      window.setTimeout(() => delete sidebar.dataset.dragMoved, 0);
+    }
     triggerSidebarSettle(releaseVelocityX);
     logFrontend('sidebar:drag-end', { velocityX: releaseVelocityX });
     if (handle.hasPointerCapture(event.pointerId)) {
@@ -1299,6 +1308,65 @@ async function proceedWithUpload(password = '') {
     btn.textContent = 'upload';
     logFrontend('upload:complete', { pendingFiles: selectedFiles.length });
   }
+}
+
+function setupTopLinksPill() {
+  const pill = document.querySelector('.top-links');
+  const toggle = document.getElementById('topLinksToggle');
+  if (!pill || !toggle) {
+    return;
+  }
+
+  toggle.addEventListener('click', () => {
+    if (pill.dataset.dragMoved === 'true') {
+      return;
+    }
+    const isOpen = pill.classList.toggle('is-expanded');
+    toggle.setAttribute('aria-expanded', String(isOpen));
+    logFrontend('top-links:toggle', { open: isOpen });
+  });
+
+  let drag = null;
+  toggle.addEventListener('pointerdown', (event) => {
+    if (!mobileViewportQuery.matches || event.button !== 0) {
+      return;
+    }
+    const rect = pill.getBoundingClientRect();
+    drag = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top, moved: false };
+    toggle.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+
+  toggle.addEventListener('pointermove', (event) => {
+    if (!drag || event.pointerId !== drag.pointerId) {
+      return;
+    }
+    if (Math.abs(event.movementX) > 1 || Math.abs(event.movementY) > 1) {
+      drag.moved = true;
+      const left = Math.min(Math.max(event.clientX - drag.offsetX, 12), window.innerWidth - pill.offsetWidth - 12);
+      const top = Math.min(Math.max(event.clientY - drag.offsetY, 12), window.innerHeight - pill.offsetHeight - 12);
+      pill.style.left = left + 'px';
+      pill.style.right = 'auto';
+      pill.style.top = top + 'px';
+      pill.style.bottom = 'auto';
+    }
+  });
+
+  const endDrag = (event) => {
+    if (!drag || event.pointerId !== drag.pointerId) {
+      return;
+    }
+    if (drag.moved) {
+      pill.dataset.dragMoved = 'true';
+      window.setTimeout(() => delete pill.dataset.dragMoved, 0);
+    }
+    drag = null;
+    if (toggle.hasPointerCapture(event.pointerId)) {
+      toggle.releasePointerCapture(event.pointerId);
+    }
+  };
+  toggle.addEventListener('pointerup', endDrag);
+  toggle.addEventListener('pointercancel', endDrag);
 }
 
 async function createPaste(event) {
@@ -1910,6 +1978,7 @@ async function initializePage() {
   currentPageId = normalizePageId(document.querySelector('.page.active')?.id?.replace('page-', ''));
   showPage(getPageIdFromHash(), { updateHash: false, immediate: true });
   setupSidebarDrag();
+  setupTopLinksPill();
   if (isMobileNavLayout()) {
     resetSidebarForMobile();
   }
