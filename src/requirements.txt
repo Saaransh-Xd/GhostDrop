@@ -5,3 +5,4 @@ dotenv
 psutil
 pyngrok
 argon2-cffi
+boto3

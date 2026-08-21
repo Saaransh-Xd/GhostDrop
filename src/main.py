@@ -31,6 +31,13 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 import mimetypes
 
+try:
+    import boto3
+    from botocore.config import Config as BotoConfig
+except ImportError:  # Optional unless STORAGE_BACKEND=s3
+    boto3 = None
+    BotoConfig = None
+
 load_dotenv()
 
 start_time = time.time()
@@ -104,6 +111,84 @@ EXPIRED_MESSAGE = "this file is gone"
 SRC_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = Path("uploads")
 METADATA_DIR = Path("uploads_meta")
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "local").strip().lower()
+
+
+class ObjectStorage:
+    """Small S3-compatible storage adapter with a local-filesystem fallback."""
+
+    def __init__(self):
+        self.remote = STORAGE_BACKEND in {"s3", "r2", "minio", "s3-compatible"}
+        self.client = None
+        self.bucket = os.getenv("S3_BUCKET", "").strip()
+        self.prefix = os.getenv("S3_PREFIX", "ghostdrop").strip("/")
+
+        if not self.remote:
+            return
+        if boto3 is None:
+            raise RuntimeError("boto3 is required when STORAGE_BACKEND is s3-compatible")
+        if not self.bucket:
+            raise RuntimeError("S3_BUCKET is required when STORAGE_BACKEND is s3-compatible")
+
+        self.client = boto3.client(
+            "s3",
+            endpoint_url=os.getenv("S3_ENDPOINT_URL") or None,
+            region_name=os.getenv("S3_REGION", "auto"),
+            aws_access_key_id=os.getenv("S3_ACCESS_KEY_ID") or None,
+            aws_secret_access_key=os.getenv("S3_SECRET_ACCESS_KEY") or None,
+            aws_session_token=os.getenv("S3_SESSION_TOKEN") or None,
+            config=BotoConfig(
+                signature_version="s3v4",
+                s3={"addressing_style": os.getenv("S3_ADDRESSING_STYLE", "auto")},
+            ),
+        )
+        logger.info("Using S3-compatible object storage (%s)", STORAGE_BACKEND)
+
+    def key(self, file_id: str, child_id: str | None = None) -> str:
+        parts = [part for part in (self.prefix, file_id, child_id) if part]
+        return "/".join(parts)
+
+    def put_file(self, fileobj, key: str, content_type: str | None = None) -> None:
+        if not self.remote:
+            return
+        extra_args = {"ContentType": content_type} if content_type else {}
+        self.client.upload_fileobj(fileobj, self.bucket, key, ExtraArgs=extra_args)
+
+    def exists(self, key: str) -> bool:
+        if not self.remote:
+            return False
+        try:
+            self.client.head_object(Bucket=self.bucket, Key=key)
+            return True
+        except self.client.exceptions.ClientError:
+            return False
+
+    def download_to_temp(self, key: str) -> str:
+        temp_file = tempfile.NamedTemporaryFile(delete=False)
+        temp_path = temp_file.name
+        temp_file.close()
+        try:
+            self.client.download_file(self.bucket, key, temp_path)
+        except Exception:
+            Path(temp_path).unlink(missing_ok=True)
+            raise
+        return temp_path
+
+    def delete(self, key: str) -> None:
+        if self.remote:
+            self.client.delete_object(Bucket=self.bucket, Key=key)
+
+    def delete_prefix(self, prefix: str) -> None:
+        if not self.remote:
+            return
+        paginator = self.client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+            objects = [{"Key": obj["Key"]} for obj in page.get("Contents", [])]
+            if objects:
+                self.client.delete_objects(Bucket=self.bucket, Delete={"Objects": objects})
+
+
+storage = ObjectStorage()
 DOWNLOAD_TEMPLATE_PATH = SRC_DIR / "public" / "download.html"
 DOWNLOAD_STYLES_PATH = SRC_DIR / "public" / "download.css"
 FOLDER_TEMPLATE_PATH = SRC_DIR / "public" / "folder.html"
@@ -147,6 +232,10 @@ def utc_now() -> datetime:
 def cleanup_file(file_id: str) -> None:
     file_path = UPLOAD_DIR / file_id
     metadata_file = metadata_path(file_id)
+
+    if storage.remote:
+        storage.delete(storage.key(file_id))
+        storage.delete_prefix(storage.key(file_id) + "/")
 
     if file_path.is_dir():
         shutil.rmtree(file_path)
@@ -309,6 +398,29 @@ def id_in_use(file_id: str) -> bool:
         or (UPLOAD_DIR / "pastes" / f"{file_id}.txt").exists()
         or paste_metadata_path(file_id).exists()
     )
+
+
+def object_key(file_id: str, child_id: str | None = None) -> str:
+    return storage.key(file_id, child_id)
+
+
+def object_exists(file_id: str, child_id: str | None = None) -> bool:
+    if storage.remote:
+        return storage.exists(object_key(file_id, child_id))
+    path = UPLOAD_DIR / file_id
+    if child_id:
+        path /= child_id
+    return path.exists()
+
+
+def materialize_object(file_id: str, child_id: str | None = None) -> tuple[Path, bool]:
+    """Return a local path for a stored object and whether it must be cleaned up."""
+    if storage.remote:
+        return Path(storage.download_to_temp(object_key(file_id, child_id))), True
+    path = UPLOAD_DIR / file_id
+    if child_id:
+        path /= child_id
+    return path, False
 
 
 def validate_slug_input(slug: str) -> None:
@@ -583,7 +695,7 @@ async def upload_file(
     duration_hours = validate_duration(duration, duration_unit)
     expiry_duration = timedelta(hours=duration_hours)
 
-    if file.size > MAX_SIZE:
+    if file.size is not None and file.size > MAX_SIZE:
         logger.warning("Rejected upload for %s: file too large", file.filename)
         raise HTTPException(status_code=413, detail="File too large")
     
@@ -595,11 +707,28 @@ async def upload_file(
     file_id = generate_file_id(slug)
     file_path = UPLOAD_DIR / file_id
 
-    if file_path.exists():
+    if object_exists(file_id):
         raise HTTPException(status_code=409, detail="Slug already in use")
 
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    temp_path = None
+    try:
+        if storage.remote:
+            temp_file = tempfile.NamedTemporaryFile(delete=False)
+            temp_path = Path(temp_file.name)
+            with temp_file:
+                shutil.copyfileobj(file.file, temp_file)
+            size_bytes = temp_path.stat().st_size
+            if size_bytes > MAX_SIZE:
+                raise HTTPException(status_code=413, detail="File too large")
+            with temp_path.open("rb") as stored_file:
+                storage.put_file(stored_file, object_key(file_id), mimetypes.guess_type(file.filename or "")[0])
+        else:
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            size_bytes = file_path.stat().st_size
+    finally:
+        if temp_path:
+            temp_path.unlink(missing_ok=True)
 
     password_hash = None
     auth_value = Authorisation or password
@@ -610,7 +739,7 @@ async def upload_file(
         file_id,
         file.filename or file_id,
         is_static=is_static,
-        size_bytes=file_path.stat().st_size,
+        size_bytes=size_bytes,
         password_hash=password_hash,
         expiry_duration=expiry_duration,
     )    
@@ -694,6 +823,23 @@ async def upload_folder(
         shutil.rmtree(folder_dir, ignore_errors=True)
         logger.exception("Folder upload failed for %s", folder_id)
         raise HTTPException(status_code=500, detail="Folder upload failed")
+
+    if storage.remote:
+        try:
+            for entry in file_entries:
+                local_path = folder_dir / entry["id"]
+                with local_path.open("rb") as stored_file:
+                    storage.put_file(
+                        stored_file,
+                        object_key(folder_id, entry["id"]),
+                        mimetypes.guess_type(entry["name"])[0],
+                    )
+        except Exception:
+            storage.delete_prefix(object_key(folder_id) + "/")
+            shutil.rmtree(folder_dir, ignore_errors=True)
+            logger.exception("Folder upload failed for %s", folder_id)
+            raise HTTPException(status_code=500, detail="Folder upload failed")
+        shutil.rmtree(folder_dir, ignore_errors=True)
 
     password_hash = None
     auth_value = Authorisation or password
@@ -807,14 +953,19 @@ async def read_items(file_id: str, request: Request):
         logger.info("Rendering folder page for %s", file_id)
         return HTMLResponse(content=render_folder_page(file_id, metadata, request))
 
-    file_path = UPLOAD_DIR / file_id
-    if not file_path.exists():
+    if not object_exists(file_id):
         logger.warning("Landing page requested for missing file %s", file_id)
         raise HTTPException(status_code=404, detail="File not found")
 
     increment_views(file_id, metadata)
     logger.info("Rendering download page for %s", file_id)
-    return HTMLResponse(content=render_download_page(file_id, metadata, file_path))
+    file_path, temporary = materialize_object(file_id)
+    try:
+        content = render_download_page(file_id, metadata, file_path)
+    finally:
+        if temporary:
+            file_path.unlink(missing_ok=True)
+    return HTMLResponse(content=content)
 
 @app.get("/static/{file_id}")
 async def server_satic_file(file_id: str):
@@ -827,9 +978,7 @@ async def server_satic_file(file_id: str):
         )
         raise HTTPException(status_code=404, detail="File not found")
 
-    file_path = UPLOAD_DIR / file_id
-
-    if not file_path.exists():
+    if not object_exists(file_id):
         logger.warning("Static file requested for missing file %s", file_id)
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -842,9 +991,12 @@ async def server_satic_file(file_id: str):
         media_type or "application/octet-stream"
     )
 
+    file_path, temporary = materialize_object(file_id)
+    background = BackgroundTask(file_path.unlink) if temporary else None
     return FileResponse(
         path=file_path,
         media_type=media_type or "application/octet-stream",
+        background=background,
     )
 
 @app.post("/folder/{folder_id}/auth")
@@ -899,12 +1051,13 @@ async def download_folder_file(
     if not entry:
         raise HTTPException(status_code=404, detail="File not found")
 
-    path = UPLOAD_DIR / folder_id / file_id
-    if not path.exists():
+    if not object_exists(folder_id, file_id):
         raise HTTPException(status_code=404, detail="File not found")
 
     logger.info("Serving folder file %s from %s as %s", file_id, folder_id, entry["name"])
-    return FileResponse(path=path, filename=entry["name"])
+    path, temporary = materialize_object(folder_id, file_id)
+    background = BackgroundTask(path.unlink) if temporary else None
+    return FileResponse(path=path, filename=entry["name"], background=background)
 
 
 @app.get("/folder/{folder_id}/download")
@@ -938,9 +1091,14 @@ async def download_folder_files(
     try:
         with zipfile.ZipFile(temp_path, "w", zipfile.ZIP_DEFLATED) as archive:
             for entry in entries:
-                path = UPLOAD_DIR / folder_id / entry["id"]
-                if path.exists():
+                if not object_exists(folder_id, entry["id"]):
+                    continue
+                path, temporary = materialize_object(folder_id, entry["id"])
+                try:
                     archive.write(path, arcname=entry["name"])
+                finally:
+                    if temporary:
+                        path.unlink(missing_ok=True)
     except Exception:
         os.unlink(temp_path)
         raise
@@ -969,12 +1127,11 @@ async def get_file(
             content={"error": EXPIRED_MESSAGE},
         )
 
-    file_path = UPLOAD_DIR / file_id
     if metadata and metadata.get("type") == "folder":
         logger.warning("Download requested for folder via file route %s", file_id)
         raise HTTPException(status_code=404, detail="File not found")
 
-    if not file_path.exists():
+    if not object_exists(file_id):
         logger.warning("Download requested for missing file %s", file_id)
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -993,9 +1150,11 @@ async def get_file(
             logger.warning("Unauthorized download attempt for protected file %s", file_id)
             raise HTTPException(status_code=401, detail="Unauthorized")
 
-    filename = metadata["original_name"] if metadata else file_path.name
+    filename = metadata["original_name"] if metadata else file_id
     logger.info("Serving file %s as %s", file_id, filename)
-    return FileResponse(path=file_path, filename=filename)
+    file_path, temporary = materialize_object(file_id)
+    background = BackgroundTask(file_path.unlink) if temporary else None
+    return FileResponse(path=file_path, filename=filename, background=background)
 
 @app.get("/metadata/{file_id}")
 async def get_metadata(file_id: str):
